@@ -1,8 +1,10 @@
 [package]
 name = "ollama-rust"
-description = "ollama-rust is a comprehensive ollama integration in rust"
-version = "1.0.0"
 edition = "2024"
+version = "1.0.0"
+description = "ollama-rust is a comprehensive ollama integration in rust"
+repository = "https://github.com/unfaded/ollama-rust"
+readme = "README.md"
 
 [dependencies]
 anyhow = "1.0.98"
