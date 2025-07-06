@@ -163,7 +163,7 @@ async fn chat(mut client: OllamaClient) -> Result<(), Box<dyn std::error::Error>
             let tool_responses = client.handle_tool_calls(tool_calls);
             messages.extend(tool_responses);
 
-            print!("AI: ");
+            print!("{}: ", client.model);
             io::stdout().flush()?;
             let (response_content, _) = client.send_chat_request(&messages).await?;
             messages.push(Message {
