@@ -5,6 +5,8 @@ version = "1.0.0"
 description = "ollama-rust is a comprehensive ollama integration in rust"
 repository = "https://github.com/unfaded/ollama-rust"
 readme = "README.md"
+license = "MIT"
+authors = ["unfaded"]
 
 [dependencies]
 anyhow = "1.0.98"
