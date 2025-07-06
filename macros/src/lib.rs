@@ -80,10 +80,10 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     .to_string();
 
     let expanded = quote! {
-        fn #tool_func_name() -> ollama_chat::Tool {
+        fn #tool_func_name() -> ollama_rust::Tool {
             #func
 
-            ollama_chat::Tool {
+            ollama_rust::Tool {
                 name: #func_name_str.to_string(),
                 description: #description.to_string(),
                 parameters: serde_json::from_str(#parameters_json).unwrap(),
