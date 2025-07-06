@@ -1,0 +1,11 @@
+[package]
+name = "ollama-rust-example"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+ollama-rust = "1.0.0"
+ollama-rust-macros = "1.0.1"
+rand = "0.9.1"
+serde_json = "1.0.140"
+tokio = "1.46.1"
