@@ -1,5 +1,6 @@
 [package]
 name = "ollama-rust-macros"
+description = "procedural macros for tools in ollama-rust"
 version = "1.0.0"
 edition = "2021"
 
