@@ -21,12 +21,17 @@ To get started and add it to your project
 cargo add ollama-rust ollama-rust-macros
 ```
 
-If you would like a more complete example to experiment with, feel free to clone the repo and try out the ollama-rust-example that I included, then go over to [Example](#Example)
+Also make sure to add these dependencies, to avoid tool macro errors
+```
+cargo add serde_json tokio
+```
+
+If you would like a more complete example to experiment with, feel free to clone the repo and try out the example that I included, then go over to [Example](#Example)
 
 I will add more detailed Usage instructions soon.
 
 ## Example
-After you're inside the example directory (ollama-rust/ollama-rust-example) you can start chatting with it by simply running, you can also ask it to use tools which I've included 2, a simple generate_password tool and a get_weather example tool that should always return that it's sunny to the AI
+After you're inside the example directory (ollama-rust/example) you can start chatting with it by simply running, you can also ask it to use tools which I've included 2, a simple generate_password tool and a get_weather example tool that should always return that it's sunny to the AI
 
 ```
 cargo run <model_name>
