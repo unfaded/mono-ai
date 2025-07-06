@@ -1,4 +1,4 @@
-### A Comprehensive Ollama integration in rust
+## A Comprehensive Ollama integration in rust
 - [Overview](#overview)
 - [Requirements](#requirements)
 - [Usage](#usage)
