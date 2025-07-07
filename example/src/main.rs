@@ -104,10 +104,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             _ => {
-                let client = OllamaClient::new(
-                    "http://localhost:11434".to_string(),
-                    "qwen3:14b".to_string(),
-                );
+                let client =
+                    OllamaClient::new("http://localhost:11434".to_string(), args[1].to_string());
                 chat(client).await?
             }
         }
