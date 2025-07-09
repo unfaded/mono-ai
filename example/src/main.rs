@@ -1,3 +1,4 @@
+use futures_util::StreamExt;
 use ollama_rust::{Message, OllamaClient};
 use ollama_rust_macros::tool;
 use rand::Rng;
@@ -56,7 +57,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if args.len() > 2 {
                     let client =
                         OllamaClient::new("http://localhost:11434".to_string(), "".to_string());
-                    client.pull_model(&args[2]).await?;
+
+                    let mut stream = client.pull_model_stream(&args[2]).await?;
+                    while let Some(progress) = stream.next().await {
+                        let progress = progress.map_err(|e| format!("Stream error: {}", e))?;
+                        if let (Some(completed), Some(total)) = (progress.completed, progress.total)
+                        {
+                            let percentage = (completed as f64 / total as f64) * 100.0;
+                            println!(
+                                "{} - {:.1}% ({}/{})",
+                                progress.status, percentage, completed, total
+                            );
+                        } else {
+                            println!("{}", progress.status);
+                        }
+                    }
                 } else {
                     println!("Provide a model name to pull.");
                 }
@@ -106,7 +121,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => {
                 let client =
                     OllamaClient::new("http://localhost:11434".to_string(), args[1].to_string());
-                chat(client).await?
+                chat_stream(client).await?
             }
         }
     } else {
@@ -114,17 +129,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "http://localhost:11434".to_string(),
             "qwen3:14b".to_string(),
         );
-        chat(client).await?;
+        chat_stream(client).await?;
     }
 
     Ok(())
 }
 
-async fn chat(mut client: OllamaClient) -> Result<(), Box<dyn std::error::Error>> {
+async fn chat_stream(mut client: OllamaClient) -> Result<(), Box<dyn std::error::Error>> {
     client.add_tool(get_weather_tool());
     client.add_tool(generate_secure_password_tool());
 
     let mut messages: Vec<Message> = Vec::new();
+
+    println!("ollama-rust example - type 'exit' to quit");
 
     loop {
         print!("Message: ");
@@ -138,6 +155,10 @@ async fn chat(mut client: OllamaClient) -> Result<(), Box<dyn std::error::Error>
             continue;
         }
 
+        if user_input == "exit" {
+            break;
+        }
+
         messages.push(Message {
             role: "user".to_string(),
             content: user_input.to_string(),
@@ -148,11 +169,29 @@ async fn chat(mut client: OllamaClient) -> Result<(), Box<dyn std::error::Error>
         print!("{}: ", client.model);
         io::stdout().flush()?;
 
-        let (response_content, tool_calls) = client.send_chat_request(&messages).await?;
+        let mut stream = client.send_chat_request_stream(&messages).await?;
+        let mut full_response = String::new();
+        let mut tool_calls: Option<Vec<ollama_rust::ToolCall>> = None;
+
+        while let Some(item) = stream.next().await {
+            let item = item.map_err(|e| format!("Stream error: {}", e))?;
+            if !item.content.is_empty() {
+                print!("{}", item.content);
+                io::stdout().flush()?;
+                full_response.push_str(&item.content);
+            }
+            if let Some(tc) = item.tool_calls {
+                tool_calls = Some(tc);
+            }
+            if item.done {
+                println!();
+                break;
+            }
+        }
 
         messages.push(Message {
             role: "assistant".to_string(),
-            content: response_content,
+            content: full_response,
             images: None,
             tool_calls: tool_calls.clone(),
         });
@@ -163,13 +202,32 @@ async fn chat(mut client: OllamaClient) -> Result<(), Box<dyn std::error::Error>
 
             print!("{}: ", client.model);
             io::stdout().flush()?;
-            let (response_content, _) = client.send_chat_request(&messages).await?;
+
+            // Handle tool response streaming
+            let mut tool_stream = client.send_chat_request_stream(&messages).await?;
+            let mut tool_response = String::new();
+
+            while let Some(item) = tool_stream.next().await {
+                let item = item.map_err(|e| format!("Stream error: {}", e))?;
+                if !item.content.is_empty() {
+                    print!("{}", item.content);
+                    io::stdout().flush()?;
+                    tool_response.push_str(&item.content);
+                }
+                if item.done {
+                    println!();
+                    break;
+                }
+            }
+
             messages.push(Message {
                 role: "assistant".to_string(),
-                content: response_content,
+                content: tool_response,
                 images: None,
                 tool_calls: None,
             });
         }
     }
+
+    Ok(())
 }
