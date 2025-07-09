@@ -664,9 +664,9 @@ dependencies = [
 
 [[package]]
 name = "ollama-rust"
-version = "1.0.0"
+version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f35147af1e59dca8ad3db9b6e411124cf98f0d8d20a24aa2e8d24aa340e8bff"
+checksum = "d9ab54441ce436314b046ab1b1bd2d9fa1835d91b0b59e12d9412a1dae24a82f"
 dependencies = [
  "anyhow",
  "base64",
@@ -680,8 +680,9 @@ dependencies = [
 
 [[package]]
 name = "ollama-rust-example"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
+ "futures-util",
  "ollama-rust",
  "ollama-rust-macros",
  "rand",
