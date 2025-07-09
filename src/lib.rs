@@ -1,10 +1,11 @@
 use base64::{Engine as _, engine::general_purpose};
-use futures_util::StreamExt;
+use futures_util::{Stream, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::error::Error;
 use std::io::Write;
+use std::pin::Pin;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
@@ -28,9 +29,24 @@ pub struct Function {
 }
 
 #[derive(Deserialize, Debug)]
-struct ChatResponse {
-    message: Message,
-    done: bool,
+pub struct ChatResponse {
+    pub message: Message,
+    pub done: bool,
+}
+
+#[derive(Debug)]
+pub struct ChatStreamItem {
+    pub content: String,
+    pub tool_calls: Option<Vec<ToolCall>>,
+    pub done: bool,
+}
+
+#[derive(Debug)]
+pub struct PullProgress {
+    pub status: String,
+    pub digest: Option<String>,
+    pub total: Option<u64>,
+    pub completed: Option<u64>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -119,7 +135,21 @@ impl OllamaClient {
 
     pub async fn pull_model(&self, model_name: &str) -> Result<(), Box<dyn Error>> {
         println!("Pulling model: {}", model_name);
-        let mut stream = self
+        let mut stream = self.pull_model_stream(model_name).await?;
+
+        while let Some(progress) = stream.next().await {
+            let progress = progress.map_err(|e| format!("Stream error: {}", e))?;
+            println!("{}", progress.status);
+        }
+        Ok(())
+    }
+
+    pub async fn pull_model_stream(
+        &self,
+        model_name: &str,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<PullProgress, String>> + Send>>, Box<dyn Error>>
+    {
+        let stream = self
             .client
             .post(&format!("{}/api/pull", self.endpoint))
             .json(&json!({ "name": model_name, "stream": true }))
@@ -127,17 +157,59 @@ impl OllamaClient {
             .await?
             .bytes_stream();
 
-        while let Some(item) = stream.next().await {
-            let chunk = item?;
-            let lines = chunk.split(|&b| b == b'\n');
-            for line in lines {
-                if line.is_empty() {
-                    continue;
+        let stream = stream.map(
+            |item| -> Result<Vec<Result<PullProgress, String>>, Box<dyn Error>> {
+                let chunk = item?;
+                let lines = chunk.split(|&b| b == b'\n');
+                let mut results = Vec::new();
+
+                for line in lines {
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    let line_str = String::from_utf8_lossy(line);
+                    match serde_json::from_str::<serde_json::Value>(&line_str) {
+                        Ok(json) => {
+                            results.push(Ok(PullProgress {
+                                status: json
+                                    .get("status")
+                                    .and_then(|s| s.as_str())
+                                    .unwrap_or("")
+                                    .to_string(),
+                                digest: json
+                                    .get("digest")
+                                    .and_then(|s| s.as_str())
+                                    .map(|s| s.to_string()),
+                                total: json.get("total").and_then(|n| n.as_u64()),
+                                completed: json.get("completed").and_then(|n| n.as_u64()),
+                            }));
+                        }
+                        Err(_) => {
+                            results.push(Ok(PullProgress {
+                                status: line_str.to_string(),
+                                digest: None,
+                                total: None,
+                                completed: None,
+                            }));
+                        }
+                    }
                 }
-                println!("{}", String::from_utf8_lossy(line));
-            }
-        }
-        Ok(())
+
+                Ok(results)
+            },
+        );
+
+        let flattened_stream = stream
+            .map(
+                |result: Result<Vec<Result<PullProgress, String>>, Box<dyn Error>>| match result {
+                    Ok(items) => futures_util::stream::iter(items),
+                    Err(e) => futures_util::stream::iter(vec![Err(e.to_string())]),
+                },
+            )
+            .flatten();
+
+        Ok(Box::pin(flattened_stream))
     }
 
     pub async fn send_chat_request_with_images(
@@ -165,7 +237,31 @@ impl OllamaClient {
     ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
         let mut full_response = String::new();
         let mut tool_calls: Option<Vec<ToolCall>> = None;
+        let mut stream = self.send_chat_request_stream(messages).await?;
 
+        while let Some(item) = stream.next().await {
+            let item = item.map_err(|e| format!("Stream error: {}", e))?;
+            if !item.content.is_empty() {
+                print!("{}", item.content);
+                std::io::stdout().flush()?;
+                full_response.push_str(&item.content);
+            }
+            if let Some(tc) = item.tool_calls {
+                tool_calls = Some(tc);
+            }
+            if item.done {
+                println!();
+                return Ok((full_response, tool_calls));
+            }
+        }
+        Ok((full_response, tool_calls))
+    }
+
+    pub async fn send_chat_request_stream(
+        &self,
+        messages: &[Message],
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>>
+    {
         let mut request_body = json!({
             "model": self.model,
             "messages": messages,
@@ -178,7 +274,7 @@ impl OllamaClient {
             request_body["tools"] = serde_json::Value::Array(tools_json);
         }
 
-        let mut stream = self
+        let stream = self
             .client
             .post(&format!("{}/api/chat", self.endpoint))
             .json(&request_body)
@@ -186,37 +282,45 @@ impl OllamaClient {
             .await?
             .bytes_stream();
 
-        while let Some(item) = stream.next().await {
-            let chunk = item?;
-            let lines = chunk.split(|&b| b == b'\n');
+        let stream = stream.map(
+            |item| -> Result<Vec<Result<ChatStreamItem, String>>, Box<dyn Error>> {
+                let chunk = item?;
+                let lines = chunk.split(|&b| b == b'\n');
+                let mut results = Vec::new();
 
-            for line in lines {
-                if line.is_empty() {
-                    continue;
-                }
-                match serde_json::from_slice::<ChatResponse>(&line) {
-                    Ok(chat_response) => {
-                        if let Some(tool_call_chunk) = &chat_response.message.tool_calls {
-                            tool_calls = Some(tool_call_chunk.to_vec());
+                for line in lines {
+                    if line.is_empty() {
+                        continue;
+                    }
+                    match serde_json::from_slice::<ChatResponse>(&line) {
+                        Ok(chat_response) => {
+                            results.push(Ok(ChatStreamItem {
+                                content: chat_response.message.content.clone(),
+                                tool_calls: chat_response.message.tool_calls.clone(),
+                                done: chat_response.done,
+                            }));
                         }
-                        if !chat_response.message.content.is_empty() {
-                            print!("{}", chat_response.message.content);
-                            std::io::stdout().flush()?;
-                            full_response.push_str(&chat_response.message.content);
-                        }
-                        if chat_response.done {
-                            println!();
-                            return Ok((full_response, tool_calls));
+                        Err(e) => {
+                            eprintln!("\nError parsing response: {}", e);
+                            eprintln!("Problematic line: {:?}", String::from_utf8_lossy(&line));
                         }
                     }
-                    Err(e) => {
-                        eprintln!("\nError parsing response: {}", e);
-                        eprintln!("Problematic line: {:?}", String::from_utf8_lossy(&line));
-                    }
                 }
-            }
-        }
-        Ok((full_response, tool_calls))
+
+                Ok(results)
+            },
+        );
+
+        let flattened_stream = stream
+            .map(
+                |result: Result<Vec<Result<ChatStreamItem, String>>, Box<dyn Error>>| match result {
+                    Ok(items) => futures_util::stream::iter(items),
+                    Err(e) => futures_util::stream::iter(vec![Err(e.to_string())]),
+                },
+            )
+            .flatten();
+
+        Ok(Box::pin(flattened_stream))
     }
 
     pub fn handle_tool_calls(&self, tool_calls: Vec<ToolCall>) -> Vec<Message> {
