@@ -80,7 +80,7 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     .to_string();
 
     let expanded = quote! {
-        fn #tool_func_name() -> ollama_rust::Tool {
+        pub fn #tool_func_name() -> ollama_rust::Tool {
             #func
 
             ollama_rust::Tool {
