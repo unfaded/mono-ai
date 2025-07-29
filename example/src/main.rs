@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use ollama_rust::{Message, OllamaClient};
+use ollama_rust::{Message, OllamaClient, OllamaOptions};
 use ollama_rust_macros::tool;
 use rand::Rng;
 use std::env;
@@ -36,6 +36,16 @@ pub fn generate_secure_password(length: usize) -> String {
     }
 
     password
+}
+
+/// Get system time and date
+#[tool]
+pub fn get_current_time() -> String {
+    println!("[ get_current_time ]");
+    
+    let current_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z").to_string();
+    
+    format!("current_time: {}", current_time)
 }
 
 #[tokio::main]
@@ -118,6 +128,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     println!("Provide a model name.");
                 }
             }
+            "generate" => {
+                if args.len() > 2 {
+                    let model_name = &args[2];
+                    let prompt = if args.len() > 3 {
+                        args[3..].join(" ")
+                    } else {
+                        println!("Enter your prompt:");
+                        let mut input = String::new();
+                        io::stdin().read_line(&mut input)?;
+                        input.trim().to_string()
+                    };
+
+                    let client = OllamaClient::new(
+                        "http://localhost:11434".to_string(),
+                        model_name.to_string(),
+                    );
+
+                    println!("Generating response\n");
+                    let mut stream = client.generate_stream(&prompt).await?;
+                    
+                    while let Some(chunk) = stream.next().await {
+                        let chunk = chunk?;
+                        print!("{}", chunk);
+                        io::stdout().flush()?;
+                    }
+                    println!();
+                } else {
+                    println!("Usage: generate <model_name> [prompt]");
+                }
+            }
             _ => {
                 let client =
                     OllamaClient::new("http://localhost:11434".to_string(), args[1].to_string());
@@ -125,9 +165,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else {
+        println!("Usage:");
+        println!("  cargo run <model_name>           - Interactive chat");
+        println!("  cargo run list                   - List local models");
+        println!("  cargo run pull <model_name>      - Pull a model");
+        println!("  cargo run image <model> <path>   - Analyze image");
+        println!("  cargo run info <model_name>      - Show model info");
+        println!("  cargo run generate <model> [prompt] - Generate text");
+        println!("  cargo run params <model> [prompt]   - Demo parameter effects");
+        println!("\nDefaulting to interactive chat with qwen3:8b");
+        
         let client = OllamaClient::new(
             "http://localhost:11434".to_string(),
-            "qwen3:14b".to_string(),
+            "qwen3:8b".to_string(),
         );
         chat_stream(client).await?;
     }
@@ -138,10 +188,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 async fn chat_stream(mut client: OllamaClient) -> Result<(), Box<dyn std::error::Error>> {
     client.add_tool(get_weather_tool());
     client.add_tool(generate_secure_password_tool());
+    client.add_tool(get_current_time_tool());
 
     let mut messages: Vec<Message> = Vec::new();
 
     println!("ollama-rust example - type 'exit' to quit");
+    println!("Available tools: get_weather, generate_secure_password, get_current_time");
 
     loop {
         print!("Message: ");
