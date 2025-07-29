@@ -150,17 +150,6 @@ impl OllamaClient {
         self.tools.push(tool);
     }
 
-    pub async fn add_tool_with_check(&mut self, tool: Tool) -> Result<(), Box<dyn Error>> {
-        if self.supports_tool_calls().await? {
-            self.tools.push(tool);
-            Ok(())
-        } else {
-            eprintln!("Warning: {} does not support tool calls. Tool {} was not added.", 
-                     self.model, tool.name);
-            Ok(())
-        }
-    }
-
     pub async fn supports_tool_calls(&self) -> Result<bool, Box<dyn Error>> {
         let model_info = self.show_model_info(&self.model).await?;
         
