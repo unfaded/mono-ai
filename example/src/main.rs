@@ -186,9 +186,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn chat_stream(mut client: OllamaClient) -> Result<(), Box<dyn std::error::Error>> {
-    client.add_tool(get_weather_tool());
-    client.add_tool(generate_secure_password_tool());
-    client.add_tool(get_current_time_tool());
+    if client.supports_tool_calls().await? {
+        client.add_tool(get_weather_tool());
+        client.add_tool(generate_secure_password_tool());
+        client.add_tool(get_current_time_tool());
+    } else {
+        eprintln!("Warning: Model doesn't support tool calls");
+    }
 
     let mut messages: Vec<Message> = Vec::new();
 
