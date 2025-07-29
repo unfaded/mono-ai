@@ -64,7 +64,12 @@ fn get_weather(location: String) -> String {
 }
 
 let mut client = OllamaClient::new("http://localhost:11434".to_string(), "qwen3:8b".to_string());
-client.add_tool(get_weather_tool());
+
+if client.supports_tool_calls().await? {
+    client.add_tool(get_weather_tool());
+} else {
+    eprintln!("Warning: Model doesn't support tool calls");
+}
 
 let mut messages = vec![Message {
     role: "user".to_string(),
@@ -135,6 +140,18 @@ let (response, _) = client
     .await?;
 ```
 
+### Safe Tool Addition
+
+Avoid errors by checking if your model supports function calling:
+
+```rust
+if client.supports_tool_calls().await? {
+    client.add_tool(my_tool);
+} else {
+    eprintln!("Warning: Model doesn't support tool calls");
+}
+```
+
 ## Example
 
 Run the included example project
@@ -167,6 +184,9 @@ cargo run generate qwen3:8b "Write a haiku about programming"
 | generate_stream() | Streaming text completion |
 | list_local_models() | List installed models |
 | pull_model() | Download model |
+| add_tool() | Add function tool, if the model doesn't support tool calls it will return an error |
+| add_tool_with_check() | Add tool with model support detection, this will not add tools if the model doesn't support them |
+| supports_tool_calls() | Check if model supports function calls |
 
 ## Available Parameters
 
@@ -185,14 +205,10 @@ See [full parameter list](src/lib.rs#L72-L110) for all options.
 
 All parameters are optional - you don't need to set any to get started.
 
-## Troubleshooting
+## Requirements
 
-### Requirements
 - [Ollama](https://ollama.ai/) installed
 - Have an Ollama model installed
-
-### Streaming Stops Early
-Check that your model supports the tool call feature. Some older models may not support function calling.
 
 ## License
 
