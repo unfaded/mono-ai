@@ -150,6 +150,31 @@ impl OllamaClient {
         self.tools.push(tool);
     }
 
+    pub async fn add_tool_with_check(&mut self, tool: Tool) -> Result<(), Box<dyn Error>> {
+        if self.supports_tool_calls().await? {
+            self.tools.push(tool);
+            Ok(())
+        } else {
+            eprintln!("Warning: {} does not support tool calls. Tool {} was not added.", 
+                     self.model, tool.name);
+            Ok(())
+        }
+    }
+
+    pub async fn supports_tool_calls(&self) -> Result<bool, Box<dyn Error>> {
+        let model_info = self.show_model_info(&self.model).await?;
+        
+        // Check if model template contains tool/function calling patterns
+        let template = model_info.template.to_lowercase();
+        let supports_tools = template.contains("tools") || 
+                           template.contains("function") || 
+                           template.contains("tool_call") ||
+                           template.contains("<|im_start|>") || 
+                           template.contains("{{.Tools}}");
+        
+        Ok(supports_tools)
+    }
+
     pub async fn list_local_models(&self) -> Result<Vec<Model>, Box<dyn Error>> {
         let response = self
             .client
