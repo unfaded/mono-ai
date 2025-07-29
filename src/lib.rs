@@ -69,6 +69,46 @@ struct ListModelsResponse {
     models: Vec<Model>,
 }
 
+#[derive(Serialize, Debug, Default)]
+pub struct OllamaOptions {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repeat_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seed: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_predict: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_ctx: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_batch: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_gqa: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_gpu: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub main_gpu: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub low_vram: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub f16_kv: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logits_all: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vocab_only: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub use_mmap: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub use_mlock: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub num_thread: Option<i32>,
+}
+
 pub struct Tool {
     pub name: String,
     pub description: String,
@@ -217,6 +257,15 @@ impl OllamaClient {
         messages: &[Message],
         image_paths: Vec<String>,
     ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+        self.send_chat_request_with_images_and_options(messages, image_paths, None).await
+    }
+
+    pub async fn send_chat_request_with_images_and_options(
+        &self,
+        messages: &[Message],
+        image_paths: Vec<String>,
+        options: Option<OllamaOptions>,
+    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
         let mut encoded_images = Vec::new();
         for image_path in image_paths {
             let image_bytes = std::fs::read(image_path)?;
@@ -228,16 +277,24 @@ impl OllamaClient {
             last_message.images = Some(encoded_images);
         }
 
-        self.send_chat_request(&messages_with_images).await
+        self.send_chat_request_with_options(&messages_with_images, options).await
     }
 
     pub async fn send_chat_request(
         &self,
         messages: &[Message],
     ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+        self.send_chat_request_with_options(messages, None).await
+    }
+
+    pub async fn send_chat_request_with_options(
+        &self,
+        messages: &[Message],
+        options: Option<OllamaOptions>,
+    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
         let mut full_response = String::new();
         let mut tool_calls: Option<Vec<ToolCall>> = None;
-        let mut stream = self.send_chat_request_stream(messages).await?;
+        let mut stream = self.send_chat_request_stream_with_options(messages, options).await?;
 
         while let Some(item) = stream.next().await {
             let item = item.map_err(|e| format!("Stream error: {}", e))?;
@@ -262,6 +319,15 @@ impl OllamaClient {
         messages: &[Message],
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>>
     {
+        self.send_chat_request_stream_with_options(messages, None).await
+    }
+
+    pub async fn send_chat_request_stream_with_options(
+        &self,
+        messages: &[Message],
+        options: Option<OllamaOptions>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>>
+    {
         let mut request_body = json!({
             "model": self.model,
             "messages": messages,
@@ -272,6 +338,10 @@ impl OllamaClient {
             let tools_json: Vec<serde_json::Value> =
                 self.tools.iter().map(|t| t.to_json()).collect();
             request_body["tools"] = serde_json::Value::Array(tools_json);
+        }
+
+        if let Some(opts) = options {
+            request_body["options"] = serde_json::to_value(opts)?;
         }
 
         let stream = self
@@ -314,6 +384,111 @@ impl OllamaClient {
         let flattened_stream = stream
             .map(
                 |result: Result<Vec<Result<ChatStreamItem, String>>, Box<dyn Error>>| match result {
+                    Ok(items) => futures_util::stream::iter(items),
+                    Err(e) => futures_util::stream::iter(vec![Err(e.to_string())]),
+                },
+            )
+            .flatten();
+
+        Ok(Box::pin(flattened_stream))
+    }
+
+    pub async fn generate(
+        &self,
+        prompt: &str,
+    ) -> Result<String, Box<dyn Error>> {
+        self.generate_with_options(prompt, None).await
+    }
+
+    pub async fn generate_with_options(
+        &self,
+        prompt: &str,
+        options: Option<OllamaOptions>,
+    ) -> Result<String, Box<dyn Error>> {
+        let mut request_body = json!({
+            "model": self.model,
+            "prompt": prompt,
+            "stream": false,
+        });
+
+        if let Some(opts) = options {
+            request_body["options"] = serde_json::to_value(opts)?;
+        }
+
+        let response = self
+            .client
+            .post(&format!("{}/api/generate", self.endpoint))
+            .json(&request_body)
+            .send()
+            .await?;
+
+        let response_json: serde_json::Value = response.json().await?;
+        Ok(response_json["response"]
+            .as_str()
+            .unwrap_or("")
+            .to_string())
+    }
+
+    pub async fn generate_stream(
+        &self,
+        prompt: &str,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, String>> + Send>>, Box<dyn Error>> {
+        self.generate_stream_with_options(prompt, None).await
+    }
+
+    pub async fn generate_stream_with_options(
+        &self,
+        prompt: &str,
+        options: Option<OllamaOptions>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<String, String>> + Send>>, Box<dyn Error>> {
+        let mut request_body = json!({
+            "model": self.model,
+            "prompt": prompt,
+            "stream": true,
+        });
+
+        if let Some(opts) = options {
+            request_body["options"] = serde_json::to_value(opts)?;
+        }
+
+        let stream = self
+            .client
+            .post(&format!("{}/api/generate", self.endpoint))
+            .json(&request_body)
+            .send()
+            .await?
+            .bytes_stream();
+
+        let stream = stream.map(
+            |item| -> Result<Vec<Result<String, String>>, Box<dyn Error>> {
+                let chunk = item?;
+                let lines = chunk.split(|&b| b == b'\n');
+                let mut results = Vec::new();
+
+                for line in lines {
+                    if line.is_empty() {
+                        continue;
+                    }
+
+                    match serde_json::from_slice::<serde_json::Value>(&line) {
+                        Ok(json) => {
+                            if let Some(response) = json["response"].as_str() {
+                                results.push(Ok(response.to_string()));
+                            }
+                        }
+                        Err(e) => {
+                            results.push(Err(format!("Parse error: {}", e)));
+                        }
+                    }
+                }
+
+                Ok(results)
+            },
+        );
+
+        let flattened_stream = stream
+            .map(
+                |result: Result<Vec<Result<String, String>>, Box<dyn Error>>| match result {
                     Ok(items) => futures_util::stream::iter(items),
                     Err(e) => futures_util::stream::iter(vec![Err(e.to_string())]),
                 },
