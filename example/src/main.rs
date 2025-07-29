@@ -10,7 +10,7 @@ use std::io::{self, Write};
 fn get_weather(location: String) -> String {
     println!("[ get_weather ] location: {}", location);
 
-    format!("The weather in {} is sunny.", location)
+    format!("Weather in {}: 72°F and sunny.", location)
 }
 
 /// Generates a secure password with a given length
