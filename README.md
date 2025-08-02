@@ -30,7 +30,7 @@ use ollama_rust::{OllamaClient, Message};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = OllamaClient::new(
         "http://localhost:11434".to_string(),
-        "qwen3:8b".to_string(),
+        "qwen3-coder:30b".to_string(),
     );
 
     let messages = vec![Message {
@@ -63,7 +63,7 @@ fn get_weather(location: String) -> String {
     format!("Weather in {}: 72°F and sunny", location)
 }
 
-let mut client = OllamaClient::new("http://localhost:11434".to_string(), "qwen3:8b".to_string());
+let mut client = OllamaClient::new("http://localhost:11434".to_string(), "qwen3-coder:30b".to_string());
 
 if client.supports_tool_calls().await? {
     client.add_tool(get_weather_tool());
@@ -140,37 +140,25 @@ let (response, _) = client
     .await?;
 ```
 
-### Safe Tool Addition
-
-Avoid errors by checking if your model supports function calling:
-
-```rust
-if client.supports_tool_calls().await? {
-    client.add_tool(my_tool);
-} else {
-    eprintln!("Warning: Model doesn't support tool calls");
-}
-```
-
 ## Example
 
 Run the included example project
 
 ```bash
 # Interactive chat with tools
-cargo run qwen3:8b
+cargo run qwen3-coder:30b
 
 # List available models
 cargo run list
 
 # Pull a new model
-cargo run pull qwen3:8b
+cargo run pull qwen3-coder:30b
 
 # Analyze an image
 cargo run image gemma:12b path/to/image.jpg
 
 # Direct text generation
-cargo run generate qwen3:8b "Write a haiku about programming"
+cargo run generate qwen3-coder:30b "Guess chat completion: He" # It will most likely respond "Hello"
 ```
 
 ## API Reference
