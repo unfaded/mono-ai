@@ -6,7 +6,7 @@ edition = "2024"
 [dependencies]
 futures-util = "0.3.31"
 unified-ai = { path = ".." }
-unified-ai-macros = "{ path = "../macros" }
+unified-ai-macros = { path = "../macros" }
 rand = "0.9.1"
 serde_json = "1.0.140"
 tokio = "1.46.1"
