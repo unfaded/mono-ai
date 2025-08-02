@@ -6,6 +6,7 @@ use serde_json::json;
 use std::error::Error;
 use std::io::Write;
 use std::pin::Pin;
+use regex::Regex;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Message {
@@ -134,6 +135,7 @@ pub struct OllamaClient {
     pub endpoint: String,
     pub model: String,
     tools: Vec<Tool>,
+    fallback_mode: bool,
 }
 
 impl OllamaClient {
@@ -143,23 +145,88 @@ impl OllamaClient {
             endpoint,
             model,
             tools: Vec::new(),
+            fallback_mode: false,
         }
     }
 
-    pub fn add_tool(&mut self, tool: Tool) {
+    pub async fn add_tool(&mut self, tool: Tool) -> Result<(), Box<dyn Error>> {
         self.tools.push(tool);
+        
+        // Only check tool support on the first tool to avoid multiple checks
+        if self.tools.len() == 1 {
+            let supports_native = self.supports_tool_calls().await?;
+            if !supports_native {
+                self.fallback_mode = true;
+            }
+        }
+        
+        Ok(())
+    }
+
+    pub fn is_fallback_mode(&self) -> bool {
+        self.fallback_mode
+    }
+
+    fn generate_tool_context(&self) -> String {
+        if self.tools.is_empty() {
+            return String::new();
+        }
+
+        let mut context = String::from("\n\nYou have access to the following tools. When you need to use a tool, respond with:\n\n<tool_call>\n{\"function\": {\"name\": \"function_name\", \"arguments\": {\"param1\": \"value1\", \"param2\": \"value2\"}}}\n</tool_call>\n\nAvailable tools:\n\n");
+        
+        for tool in &self.tools {
+            context.push_str(&format!("{}: {}\n", tool.name, tool.description));
+            context.push_str(&format!("Parameters schema: {}\n\n", serde_json::to_string_pretty(&tool.parameters).unwrap_or_default()));
+        }
+        
+        context.push_str("When using tools, wrap the JSON in <tool_call></tool_call> tags as shown above. Don't feel obligated to use tool calls if it doesn't make sense to do so or you weren't instructed. Normally you'll want to present your results to the user after making a tool call, as the user doesn't know the result, unless explicitly told otherwise (example: the user wants many consecutive tool calls).\n");
+        context
+    }
+
+    fn parse_fallback_tool_calls(&self, content: &str) -> Option<Vec<ToolCall>> {
+        let xml_regex = Regex::new(r"(?s)<tool_call>(.*?)</tool_call>").ok()?;
+        
+        let mut all_tool_calls = Vec::new();
+        
+        for caps in xml_regex.captures_iter(content) {
+            if let Some(json_str) = caps.get(1) {
+                let json_content = json_str.as_str().trim();
+                
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(json_content) {
+                    if let (Some(name), Some(arguments)) = (
+                        parsed.get("function").and_then(|f| f.get("name")).and_then(|n| n.as_str()),
+                        parsed.get("function").and_then(|f| f.get("arguments"))
+                    ) {
+                        all_tool_calls.push(ToolCall {
+                            function: Function {
+                                name: name.to_string(),
+                                arguments: arguments.clone(),
+                            }
+                        });
+                    }
+                }
+            }
+        }
+        
+        if !all_tool_calls.is_empty() {
+            Some(all_tool_calls)
+        } else {
+            None
+        }
     }
 
     pub async fn supports_tool_calls(&self) -> Result<bool, Box<dyn Error>> {
         let model_info = self.show_model_info(&self.model).await?;
         
-        // Check if model template contains tool/function calling patterns
-        let template = model_info.template.to_lowercase();
-        let supports_tools = template.contains("tools") || 
-                           template.contains("function") || 
-                           template.contains("tool_call") ||
-                           template.contains("<|im_start|>") || 
-                           template.contains("{{.Tools}}");
+        // The definitive way to check tool support is the presence of {{ .Tools }} in the template
+        // All models that support tools use the {{ .Tools }} variable in their prompt template
+        let template = &model_info.template;
+        let supports_tools = template.contains("{{ .Tools }}") || 
+                           template.contains("{{.Tools}}") ||
+                           template.contains("{{ .tools }}") ||
+                           template.contains("{{.tools}}") ||
+                           template.contains("{{- .Tools }}") ||
+                           template.contains("{{- .tools }}");
         
         Ok(supports_tools)
     }
@@ -342,13 +409,34 @@ impl OllamaClient {
         options: Option<OllamaOptions>,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>>
     {
+        let mut messages_to_send = messages.to_vec();
+        
+        // In fallback mode, inject tool context into the system message
+        if self.fallback_mode && !self.tools.is_empty() {
+            let tool_context = self.generate_tool_context();
+            
+            // Find existing system message or create one
+            if let Some(system_msg) = messages_to_send.iter_mut().find(|msg| msg.role == "system") {
+                system_msg.content.push_str(&tool_context);
+            } else {
+                // Insert system message at the beginning
+                messages_to_send.insert(0, Message {
+                    role: "system".to_string(),
+                    content: format!("You are a helpful assistant.{}", tool_context),
+                    images: None,
+                    tool_calls: None,
+                });
+            }
+        }
+
         let mut request_body = json!({
             "model": self.model,
-            "messages": messages,
+            "messages": messages_to_send,
             "stream": true,
         });
 
-        if !self.tools.is_empty() {
+        // Only add tools if not in fallback mode
+        if !self.fallback_mode && !self.tools.is_empty() {
             let tools_json: Vec<serde_json::Value> =
                 self.tools.iter().map(|t| t.to_json()).collect();
             request_body["tools"] = serde_json::Value::Array(tools_json);
@@ -366,8 +454,9 @@ impl OllamaClient {
             .await?
             .bytes_stream();
 
+        let fallback_mode = self.fallback_mode;
         let stream = stream.map(
-            |item| -> Result<Vec<Result<ChatStreamItem, String>>, Box<dyn Error>> {
+            move |item| -> Result<Vec<Result<ChatStreamItem, String>>, Box<dyn Error>> {
                 let chunk = item?;
                 let lines = chunk.split(|&b| b == b'\n');
                 let mut results = Vec::new();
@@ -378,9 +467,17 @@ impl OllamaClient {
                     }
                     match serde_json::from_slice::<ChatResponse>(&line) {
                         Ok(chat_response) => {
+                            let tool_calls = chat_response.message.tool_calls.clone();
+                            
+                            // In fallback mode, try to parse tool calls from content
+                            if fallback_mode && tool_calls.is_none() && !chat_response.message.content.is_empty() {
+                                // Note: We can't call self.parse_fallback_tool_calls here because of ownership
+                                // This will be handled in the client code after collecting the full response
+                            }
+                            
                             results.push(Ok(ChatStreamItem {
                                 content: chat_response.message.content.clone(),
-                                tool_calls: chat_response.message.tool_calls.clone(),
+                                tool_calls,
                                 done: chat_response.done,
                             }));
                         }
@@ -521,14 +618,49 @@ impl OllamaClient {
                 .find(|t| t.name == tool_call.function.name)
             {
                 let result = (tool.function)(tool_call.function.arguments.clone());
+                
+                // In fallback mode, format tool response as user message with tool context
+                let (role, content) = if self.fallback_mode {
+                    ("user".to_string(), format!("Tool response from {}: {}", tool_call.function.name, result))
+                } else {
+                    ("tool".to_string(), result)
+                };
+                
                 tool_responses.push(Message {
-                    role: "tool".to_string(),
-                    content: result,
+                    role,
+                    content,
                     images: None,
                     tool_calls: None,
                 });
             }
         }
         tool_responses
+    }
+
+    pub fn process_fallback_response(&self, content: &str) -> (String, Option<Vec<ToolCall>>) {
+        if !self.fallback_mode {
+            return (content.to_string(), None);
+        }
+
+        if let Some(tool_calls) = self.parse_fallback_tool_calls(content) {
+            // Remove the tool call XML from the content
+            let xml_regex = Regex::new(r"(?s)<tool_call>.*?</tool_call>").unwrap();
+            let cleaned_content = xml_regex.replace_all(content, "").trim().to_string();
+            
+            // If cleaned content is empty or very short, indicate tool usage
+            let final_content = if cleaned_content.len() < 10 {
+                "I'll help you with that.".to_string()
+            } else {
+                cleaned_content
+            };
+            
+            (final_content, Some(tool_calls))
+        } else {
+            // Check for incomplete tool calls and remove them
+            let incomplete_regex = Regex::new(r"<tool_call>\s*$").unwrap();
+            let cleaned_content = incomplete_regex.replace_all(content, "").trim().to_string();
+            
+            (cleaned_content, None)
+        }
     }
 }
