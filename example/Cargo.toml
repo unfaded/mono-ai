@@ -1,12 +1,12 @@
 [package]
-name = "ollama-rust-example"
+name = "unified-ai-example"
 version = "1.1.0"
 edition = "2024"
 
 [dependencies]
 futures-util = "0.3.31"
-ollama-rust = { path = ".." }
-ollama-rust-macros = "1.0.1"
+unified-ai = { path = ".." }
+unified-ai-macros = "{ path = "../macros" }
 rand = "0.9.1"
 serde_json = "1.0.140"
 tokio = "1.46.1"

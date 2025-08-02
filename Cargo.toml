@@ -1,9 +1,9 @@
 [package]
-name = "ollama-rust"
+name = "unified-ai"
 edition = "2024"
 version = "1.3.0"
-description = "ollama-rust is a comprehensive ollama integration in rust"
-repository = "https://github.com/unfaded/ollama-rust"
+description = "Provider-agnostic Rust AI library"
+repository = "https://github.com/unfaded/unified-ai"
 readme = "README.md"
 license = "MIT"
 authors = ["unfaded"]

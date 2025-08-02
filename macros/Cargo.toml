@@ -1,11 +1,11 @@
 [package]
-name = "ollama-rust-macros"
-description = "procedural macros for tools in ollama-rust"
+name = "unified-ai-macros"
+description = "procedural macros for tools in unified-ai"
 license = "MIT"
 version = "1.1.1"
 edition = "2024"
 readme = "../README.md"
-repository = "https://github.com/unfaded/ollama-rust"
+repository = "https://github.com/unfaded/unified-ai"
 authors = ["unfaded"]
 
 [lib]
