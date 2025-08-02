@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use ollama_rust::{Message, OllamaClient, OllamaOptions};
+use ollama_rust::{Message, OllamaClient};
 use ollama_rust_macros::tool;
 use rand::Rng;
 use std::env;
@@ -186,12 +186,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 async fn chat_stream(mut client: OllamaClient) -> Result<(), Box<dyn std::error::Error>> {
-    if client.supports_tool_calls().await? {
-        client.add_tool(get_weather_tool());
-        client.add_tool(generate_secure_password_tool());
-        client.add_tool(get_current_time_tool());
+    // Add tools and automatically handle fallback mode
+    client.add_tool(get_weather_tool()).await?;
+    client.add_tool(generate_secure_password_tool()).await?;
+    client.add_tool(get_current_time_tool()).await?;
+    
+    if client.is_fallback_mode() {
+        println!("Model doesn't support native tool calls - using fallback mode with JSON prompting");
     } else {
-        eprintln!("Warning: Model doesn't support tool calls");
+        println!("Model supports native tool calls");
     }
 
     let mut messages: Vec<Message> = Vec::new();
@@ -245,9 +248,15 @@ async fn chat_stream(mut client: OllamaClient) -> Result<(), Box<dyn std::error:
             }
         }
 
+        // Process response for fallback tool calls if needed
+        let (processed_content, fallback_tool_calls) = client.process_fallback_response(&full_response);
+        if fallback_tool_calls.is_some() {
+            tool_calls = fallback_tool_calls;
+        }
+
         messages.push(Message {
             role: "assistant".to_string(),
-            content: full_response,
+            content: if tool_calls.is_some() { processed_content } else { full_response },
             images: None,
             tool_calls: tool_calls.clone(),
         });
