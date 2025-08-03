@@ -182,11 +182,39 @@ impl OllamaClient {
         &self,
         messages: &[Message],
         image_paths: Vec<String>,
-    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
-        self.send_chat_request_with_images_and_options(messages, image_paths, None).await
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
+        self.send_chat_request_with_images_stream_and_options(messages, image_paths, None).await
     }
 
-    pub async fn send_chat_request_with_images_and_options(
+    pub async fn send_chat_request_with_images_no_stream(
+        &self,
+        messages: &[Message],
+        image_paths: Vec<String>,
+    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+        self.send_chat_request_with_images_no_stream_and_options(messages, image_paths, None).await
+    }
+
+    pub async fn send_chat_request_with_images_stream_and_options(
+        &self,
+        messages: &[Message],
+        image_paths: Vec<String>,
+        options: Option<OllamaOptions>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
+        let mut encoded_images = Vec::new();
+        for image_path in image_paths {
+            let image_bytes = std::fs::read(image_path)?;
+            encoded_images.push(general_purpose::STANDARD.encode(image_bytes));
+        }
+
+        let mut messages_with_images = messages.to_vec();
+        if let Some(last_message) = messages_with_images.last_mut() {
+            last_message.images = Some(encoded_images);
+        }
+
+        self.send_chat_request_stream_with_options(&messages_with_images, options).await
+    }
+
+    pub async fn send_chat_request_with_images_no_stream_and_options(
         &self,
         messages: &[Message],
         image_paths: Vec<String>,
@@ -203,18 +231,45 @@ impl OllamaClient {
             last_message.images = Some(encoded_images);
         }
 
-        self.send_chat_request_with_options(&messages_with_images, options).await
+        self.send_chat_request_no_stream_with_options(&messages_with_images, options).await
     }
 
     pub async fn send_chat_request_with_images_data(
         &self,
         messages: &[Message],
         images_data: Vec<Vec<u8>>,
-    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
-        self.send_chat_request_with_images_data_and_options(messages, images_data, None).await
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
+        self.send_chat_request_with_images_data_stream_and_options(messages, images_data, None).await
     }
 
-    pub async fn send_chat_request_with_images_data_and_options(
+    pub async fn send_chat_request_with_images_data_no_stream(
+        &self,
+        messages: &[Message],
+        images_data: Vec<Vec<u8>>,
+    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+        self.send_chat_request_with_images_data_no_stream_and_options(messages, images_data, None).await
+    }
+
+    pub async fn send_chat_request_with_images_data_stream_and_options(
+        &self,
+        messages: &[Message],
+        images_data: Vec<Vec<u8>>,
+        options: Option<OllamaOptions>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
+        let mut encoded_images = Vec::new();
+        for image_bytes in images_data {
+            encoded_images.push(general_purpose::STANDARD.encode(image_bytes));
+        }
+
+        let mut messages_with_images = messages.to_vec();
+        if let Some(last_message) = messages_with_images.last_mut() {
+            last_message.images = Some(encoded_images);
+        }
+
+        self.send_chat_request_stream_with_options(&messages_with_images, options).await
+    }
+
+    pub async fn send_chat_request_with_images_data_no_stream_and_options(
         &self,
         messages: &[Message],
         images_data: Vec<Vec<u8>>,
@@ -230,17 +285,24 @@ impl OllamaClient {
             last_message.images = Some(encoded_images);
         }
 
-        self.send_chat_request_with_options(&messages_with_images, options).await
+        self.send_chat_request_no_stream_with_options(&messages_with_images, options).await
     }
 
     pub async fn send_chat_request(
         &self,
         messages: &[Message],
-    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
-        self.send_chat_request_with_options(messages, None).await
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
+        self.send_chat_request_stream_with_options(messages, None).await
     }
 
-    pub async fn send_chat_request_with_options(
+    pub async fn send_chat_request_no_stream(
+        &self,
+        messages: &[Message],
+    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+        self.send_chat_request_no_stream_with_options(messages, None).await
+    }
+
+    pub async fn send_chat_request_no_stream_with_options(
         &self,
         messages: &[Message],
         options: Option<OllamaOptions>,
@@ -252,15 +314,12 @@ impl OllamaClient {
         while let Some(item) = stream.next().await {
             let item = item.map_err(|e| format!("Stream error: {}", e))?;
             if !item.content.is_empty() {
-                print!("{}", item.content);
-                std::io::stdout().flush()?;
                 full_response.push_str(&item.content);
             }
             if let Some(tc) = item.tool_calls {
                 tool_calls = Some(tc);
             }
             if item.done {
-                println!();
                 return Ok((full_response, tool_calls));
             }
         }

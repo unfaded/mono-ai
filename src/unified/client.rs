@@ -58,45 +58,67 @@ impl UnifiedAI {
         }
     }
 
-    /// Send chat request with streaming disabled, returns complete response and tool calls
+    /// Send chat request with real-time streaming response
     pub async fn send_chat_request(
         &self,
         messages: &[Message],
-    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.send_chat_request(messages).await,
         }
     }
 
-    /// Send chat request with real-time streaming response
-    pub async fn send_chat_request_stream(
+    /// Send chat request without streaming, returns complete response and tool calls
+    pub async fn send_chat_request_no_stream(
         &self,
         messages: &[Message],
-    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
+    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
         match &self.provider {
-            Provider::Ollama(client) => client.send_chat_request_stream(messages).await,
+            Provider::Ollama(client) => client.send_chat_request_no_stream(messages).await,
         }
     }
 
-    /// Send chat request with images loaded from file paths
+    /// Send chat request with images from file paths, returns real-time streaming response
     pub async fn send_chat_request_with_images(
         &self,
         messages: &[Message],
         image_paths: Vec<String>,
-    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.send_chat_request_with_images(messages, image_paths).await,
         }
     }
 
-    /// Send chat request with image data from memory (single image: vec![data], multiple: vec![data1, data2])
+    /// Send chat request with images from file paths, returns complete response and tool calls
+    pub async fn send_chat_request_with_images_no_stream(
+        &self,
+        messages: &[Message],
+        image_paths: Vec<String>,
+    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+        match &self.provider {
+            Provider::Ollama(client) => client.send_chat_request_with_images_no_stream(messages, image_paths).await,
+        }
+    }
+
+    /// Send chat request with image data from memory, returns real-time streaming response (single image: vec![data], multiple: vec![data1, data2])
     pub async fn send_chat_request_with_image_data(
+        &self,
+        messages: &[Message],
+        images_data: Vec<Vec<u8>>,
+    ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
+        match &self.provider {
+            Provider::Ollama(client) => client.send_chat_request_with_images_data(messages, images_data).await,
+        }
+    }
+
+    /// Send chat request with image data from memory, returns complete response and tool calls (single image: vec![data], multiple: vec![data1, data2])
+    pub async fn send_chat_request_with_image_data_no_stream(
         &self,
         messages: &[Message],
         images_data: Vec<Vec<u8>>,
     ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
         match &self.provider {
-            Provider::Ollama(client) => client.send_chat_request_with_images_data(messages, images_data).await,
+            Provider::Ollama(client) => client.send_chat_request_with_images_data_no_stream(messages, images_data).await,
         }
     }
 
