@@ -3,7 +3,6 @@ use futures_util::{Stream, StreamExt};
 use reqwest::Client;
 use serde_json::json;
 use std::error::Error;
-use std::io::Write;
 use std::pin::Pin;
 
 use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool, FallbackToolHandler};
