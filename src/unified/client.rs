@@ -45,9 +45,23 @@ impl UnifiedAI {
     }
 
     /// Check if client is using fallback tool calling (XML prompting vs native tools)
-    pub fn is_fallback_mode(&self) -> bool {
+    pub async fn is_fallback_mode(&self) -> bool {
         match &self.provider {
-            Provider::Ollama(client) => client.is_fallback_mode(),
+            Provider::Ollama(client) => client.is_fallback_mode().await,
+        }
+    }
+
+    /// Enable/disable debug mode to show raw tool call XML in fallback mode
+    pub fn set_debug_mode(&mut self, debug: bool) {
+        match &mut self.provider {
+            Provider::Ollama(client) => client.set_debug_mode(debug),
+        }
+    }
+
+    /// Check if debug mode is enabled
+    pub fn debug_mode(&self) -> bool {
+        match &self.provider {
+            Provider::Ollama(client) => client.debug_mode(),
         }
     }
 
@@ -171,16 +185,16 @@ impl UnifiedAI {
     }
 
     /// Execute tool calls and return formatted messages for conversation continuation
-    pub fn handle_tool_calls(&self, tool_calls: Vec<ToolCall>) -> Vec<Message> {
+    pub async fn handle_tool_calls(&self, tool_calls: Vec<ToolCall>) -> Vec<Message> {
         match &self.provider {
-            Provider::Ollama(client) => client.handle_tool_calls(tool_calls),
+            Provider::Ollama(client) => client.handle_tool_calls(tool_calls).await,
         }
     }
 
     /// Parse fallback tool calls from response content and clean XML artifacts
-    pub fn process_fallback_response(&self, content: &str) -> (String, Option<Vec<ToolCall>>) {
+    pub async fn process_fallback_response(&self, content: &str) -> (String, Option<Vec<ToolCall>>) {
         match &self.provider {
-            Provider::Ollama(client) => client.process_fallback_response(content),
+            Provider::Ollama(client) => client.process_fallback_response(content).await,
         }
     }
 
