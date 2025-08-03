@@ -1,0 +1,7 @@
+[workspace]
+resolver = "2"
+members = [
+    "chat",
+    "chat-vision", 
+    "ollama-management",
+]
