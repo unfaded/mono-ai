@@ -3,3 +3,4 @@
 /example/target
 /examples/target
 /examples/*/target
+.env
