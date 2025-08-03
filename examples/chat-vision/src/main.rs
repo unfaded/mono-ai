@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Add assistant response to conversation FIRST
+    // Add assistant response to conversation
     messages.push(Message {
         role: "assistant".to_string(),
         content: full_response,
@@ -171,7 +171,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
-        // Add assistant response to conversation FIRST
+        // Add assistant response to conversation
         messages.push(Message {
             role: "assistant".to_string(),
             content: full_response,
