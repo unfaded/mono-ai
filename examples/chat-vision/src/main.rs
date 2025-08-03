@@ -29,17 +29,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create client - Choose your provider:
     
     // Option 1: Ollama (local vision model)
-    let client = UnifiedAI::ollama(
-        "http://localhost:11434".to_string(),
-        model,
-    );
+    //let client = UnifiedAI::ollama(
+    //    "http://localhost:11434".to_string(),
+    //    model,
+    //);
 
     // For cloud providers: You can hardcode keys instead of using environment variables if preferred
     // Option 2: Anthropic Claude (requires API key)
-    // let client = UnifiedAI::anthropic(
-    //     std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY not set"),
-    //     "claude-sonnet-4-20250514".to_string(), // Claude has built-in vision
-    // );
+    let client = UnifiedAI::anthropic(
+        std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY not set"),
+        "claude-sonnet-4-20250514".to_string(), // Claude has built-in vision
+    );
 
     // The rest works identically regardless of provider!
 
@@ -62,6 +62,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stream = client.send_chat_request(&messages).await?;
     
     let mut full_response = String::new();
+    let mut tool_calls = None;
 
     while let Some(item) = stream.next().await {
         let item = item.map_err(|e| format!("Stream error: {}", e))?;
@@ -72,18 +73,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             full_response.push_str(&item.content);
         }
         
+        if let Some(tc) = item.tool_calls {
+            tool_calls = Some(tc);
+        }
+        
         if item.done {
             break;
         }
     }
 
-    // Add assistant response to conversation
+    // Add assistant response to conversation FIRST
     messages.push(Message {
         role: "assistant".to_string(),
         content: full_response,
         images: None,
-        tool_calls: None,
+        tool_calls: tool_calls.clone(),
     });
+
+    // Handle tool calls if any
+    if let Some(ref tc) = tool_calls {
+        let tool_responses = client.handle_tool_calls(tc.clone()).await;
+        messages.extend(tool_responses);
+        
+        // Continue conversation after tool execution  
+        print!("{}: ", client.model());
+        io::stdout().flush()?;
+        let mut tool_stream = client.send_chat_request(&messages).await?;
+        let mut final_response = String::new();
+        while let Some(item) = tool_stream.next().await {
+            let item = item.map_err(|e| format!("Stream error: {}", e))?;
+            if !item.content.is_empty() {
+                print!("{}", item.content);
+                io::stdout().flush()?;
+                final_response.push_str(&item.content);
+            }
+            if item.done {
+                break;
+            }
+        }
+        
+        // Add the final assistant response to conversation
+        messages.push(Message {
+            role: "assistant".to_string(),
+            content: final_response,
+            images: None,
+            tool_calls: None,
+        });
+    }
 
     println!();
 
@@ -115,6 +151,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut stream = client.send_chat_request(&messages).await?;
         let mut full_response = String::new();
+        let mut tool_calls = None;
 
         while let Some(item) = stream.next().await {
             let item = item.map_err(|e| format!("Stream error: {}", e))?;
@@ -125,18 +162,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 full_response.push_str(&item.content);
             }
             
+            if let Some(tc) = item.tool_calls {
+                tool_calls = Some(tc);
+            }
+            
             if item.done {
                 break;
             }
         }
 
-        // Add assistant response to conversation
+        // Add assistant response to conversation FIRST
         messages.push(Message {
             role: "assistant".to_string(),
             content: full_response,
             images: None,
-            tool_calls: None,
+            tool_calls: tool_calls.clone(),
         });
+
+        // Handle tool calls if any
+        if let Some(ref tc) = tool_calls {
+            let tool_responses = client.handle_tool_calls(tc.clone()).await;
+            messages.extend(tool_responses);
+            
+            // Continue conversation after tool execution  
+            print!("{}: ", client.model());
+            io::stdout().flush()?;
+            let mut tool_stream = client.send_chat_request(&messages).await?;
+            let mut final_response = String::new(); 
+            while let Some(item) = tool_stream.next().await {
+                let item = item.map_err(|e| format!("Stream error: {}", e))?;
+                if !item.content.is_empty() {
+                    print!("{}", item.content);
+                    io::stdout().flush()?;
+                    final_response.push_str(&item.content);
+                }
+                if item.done {
+                    break;
+                }
+            }
+            
+            // Add the final assistant response to conversation
+            messages.push(Message {
+                role: "assistant".to_string(),
+                content: final_response,
+                images: None,
+                tool_calls: None,
+            });
+        }
 
         println!();
     }
