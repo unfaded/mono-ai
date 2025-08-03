@@ -7,6 +7,7 @@ use std::pin::Pin;
 
 use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool, FallbackToolHandler};
 use super::{OllamaOptions, ChatResponse, Model, ListModelsResponse};
+use super::utilities::StreamingXmlFilter;
 
 impl Tool {
     fn to_json(&self) -> serde_json::Value {
@@ -26,7 +27,7 @@ pub struct OllamaClient {
     pub endpoint: String,
     pub model: String,
     tools: Vec<Tool>,
-    fallback_mode: bool,
+    debug_mode: bool,
 }
 
 impl OllamaClient {
@@ -36,41 +37,43 @@ impl OllamaClient {
             endpoint,
             model,
             tools: Vec::new(),
-            fallback_mode: false,
+            debug_mode: false,
         }
+    }
+
+    pub fn set_debug_mode(&mut self, debug: bool) {
+        self.debug_mode = debug;
+    }
+
+    pub fn debug_mode(&self) -> bool {
+        self.debug_mode
     }
 
     pub async fn add_tool(&mut self, tool: Tool) -> Result<(), Box<dyn Error>> {
         self.tools.push(tool);
         
-        // Only check tool support on the first tool to avoid multiple checks
-        if self.tools.len() == 1 {
-            let supports_native = self.supports_tool_calls().await?;
-            if !supports_native {
-                self.fallback_mode = true;
-            }
-        }
+        // Tool support is now determined dynamically when needed
         
         Ok(())
     }
 
-    pub fn is_fallback_mode(&self) -> bool {
-        self.fallback_mode
+    pub async fn is_fallback_mode(&self) -> bool {
+        if self.tools.is_empty() {
+            false // No tools, no fallback needed
+        } else {
+            // Dynamically check if model supports native tools
+            !self.supports_tool_calls().await.unwrap_or(false)
+        }
     }
 
 
     pub async fn supports_tool_calls(&self) -> Result<bool, Box<dyn Error>> {
         let model_info = self.show_model_info(&self.model).await?;
         
-        // The definitive way to check tool support is the presence of {{ .Tools }} in the template
-        // All models that support tools use the {{ .Tools }} variable in their prompt template
+        // The definitive way to check tool support is the presence of .Tools in the template
+        // All models that support tools use the .Tools variable in their prompt template
         let template = &model_info.template;
-        let supports_tools = template.contains("{{ .Tools }}") || 
-                           template.contains("{{.Tools}}") ||
-                           template.contains("{{ .tools }}") ||
-                           template.contains("{{.tools}}") ||
-                           template.contains("{{- .Tools }}") ||
-                           template.contains("{{- .tools }}");
+        let supports_tools = template.contains(".Tools") || template.contains(".tools");
         
         Ok(supports_tools)
     }
@@ -342,7 +345,8 @@ impl OllamaClient {
         let mut messages_to_send = messages.to_vec();
         
         // In fallback mode, inject tool context into the system message
-        if self.fallback_mode && !self.tools.is_empty() {
+        let is_fallback = self.is_fallback_mode().await;
+        if is_fallback && !self.tools.is_empty() {
             let tool_context = FallbackToolHandler::generate_tool_context(&self.tools);
             
             // Find existing system message or create one
@@ -366,7 +370,7 @@ impl OllamaClient {
         });
 
         // Only add tools if not in fallback mode
-        if !self.fallback_mode && !self.tools.is_empty() {
+        if !is_fallback && !self.tools.is_empty() {
             let tools_json: Vec<serde_json::Value> =
                 self.tools.iter().map(|t| t.to_json()).collect();
             request_body["tools"] = serde_json::Value::Array(tools_json);
@@ -384,47 +388,73 @@ impl OllamaClient {
             .await?
             .bytes_stream();
 
-        let fallback_mode = self.fallback_mode;
-        let stream = stream.map(
-            move |item| -> Result<Vec<Result<ChatStreamItem, String>>, Box<dyn Error>> {
-                let chunk = item?;
-                let lines = chunk.split(|&b| b == b'\n');
-                let mut results = Vec::new();
+        let fallback_mode = self.is_fallback_mode().await;
+        let debug_mode = self.debug_mode;
+        
+        // Create a stateful stream that handles tool calling internally
+        let stream = futures_util::stream::unfold(
+            (stream, StreamingXmlFilter::new(), String::new(), false),
+            move |(mut stream, mut xml_filter, mut accumulated_raw, mut stream_done)| async move {
+                match stream.next().await {
+                    Some(chunk_result) => {
+                        match chunk_result {
+                            Ok(chunk) => {
+                                let lines = chunk.split(|&b| b == b'\n');
+                                let mut results = Vec::new();
 
-                for line in lines {
-                    if line.is_empty() {
-                        continue;
-                    }
-                    match serde_json::from_slice::<ChatResponse>(&line) {
-                        Ok(chat_response) => {
-                            let tool_calls = chat_response.message.tool_calls.clone();
-                            
-                            // In fallback mode, try to parse tool calls from content
-                            if fallback_mode && tool_calls.is_none() && !chat_response.message.content.is_empty() {
-                                // Note: We can't call self.parse_fallback_tool_calls here because of ownership
-                                // This will be handled in the client code after collecting the full response
+                                for line in lines {
+                                    if line.is_empty() {
+                                        continue;
+                                    }
+                                    match serde_json::from_slice::<ChatResponse>(&line) {
+                                        Ok(chat_response) => {
+                                            let mut tool_calls = chat_response.message.tool_calls.clone();
+                                            let raw_content = chat_response.message.content.clone();
+                                            
+                                            // Accumulate raw content for fallback tool detection
+                                            accumulated_raw.push_str(&raw_content);
+                                            
+                                            // Apply XML filtering when debug is disabled
+                                            let content = if !debug_mode {
+                                                xml_filter.process_chunk(&raw_content)
+                                            } else {
+                                                raw_content.clone()
+                                            };
+                                            
+                                            // On stream completion, check for fallback tool calls
+                                            if chat_response.done && fallback_mode && tool_calls.is_none() {
+                                                if let Some(fallback_tools) = FallbackToolHandler::parse_fallback_tool_calls(&accumulated_raw) {
+                                                    tool_calls = Some(fallback_tools);
+                                                }
+                                                stream_done = true;
+                                            }
+                                            
+                                            results.push(Ok(ChatStreamItem {
+                                                content,
+                                                tool_calls,
+                                                done: chat_response.done,
+                                            }));
+                                        }
+                                        Err(e) => {
+                                            eprintln!("\nError parsing response: {}", e);
+                                            eprintln!("Problematic line: {:?}", String::from_utf8_lossy(&line));
+                                        }
+                                    }
+                                }
+                                
+                                Some((Ok(results), (stream, xml_filter, accumulated_raw, stream_done)))
                             }
-                            
-                            results.push(Ok(ChatStreamItem {
-                                content: chat_response.message.content.clone(),
-                                tool_calls,
-                                done: chat_response.done,
-                            }));
-                        }
-                        Err(e) => {
-                            eprintln!("\nError parsing response: {}", e);
-                            eprintln!("Problematic line: {:?}", String::from_utf8_lossy(&line));
+                            Err(e) => Some((Err(Box::new(e) as Box<dyn Error>), (stream, xml_filter, accumulated_raw, stream_done)))
                         }
                     }
+                    None => None
                 }
-
-                Ok(results)
-            },
+            }
         );
 
         let flattened_stream = stream
             .map(
-                |result: Result<Vec<Result<ChatStreamItem, String>>, Box<dyn Error>>| match result {
+                |result| match result {
                     Ok(items) => futures_util::stream::iter(items),
                     Err(e) => futures_util::stream::iter(vec![Err(e.to_string())]),
                 },
@@ -539,7 +569,7 @@ impl OllamaClient {
         Ok(Box::pin(flattened_stream))
     }
 
-    pub fn handle_tool_calls(&self, tool_calls: Vec<ToolCall>) -> Vec<Message> {
+    pub async fn handle_tool_calls(&self, tool_calls: Vec<ToolCall>) -> Vec<Message> {
         let mut tool_responses = Vec::new();
         for tool_call in tool_calls {
             if let Some(tool) = self
@@ -550,7 +580,8 @@ impl OllamaClient {
                 let result = (tool.function)(tool_call.function.arguments.clone());
                 
                 // In fallback mode, format tool response as user message with tool context
-                let (role, content) = if self.fallback_mode {
+                let is_fallback = self.is_fallback_mode().await;
+                let (role, content) = if is_fallback {
                     ("user".to_string(), format!("Tool response from {}: {}", tool_call.function.name, result))
                 } else {
                     ("tool".to_string(), result)
@@ -567,8 +598,9 @@ impl OllamaClient {
         tool_responses
     }
 
-    pub fn process_fallback_response(&self, content: &str) -> (String, Option<Vec<ToolCall>>) {
-        if !self.fallback_mode {
+    pub async fn process_fallback_response(&self, content: &str) -> (String, Option<Vec<ToolCall>>) {
+        let is_fallback = self.is_fallback_mode().await;
+        if !is_fallback {
             return (content.to_string(), None);
         }
 
