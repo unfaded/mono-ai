@@ -12,6 +12,8 @@ pub struct Message {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ToolCall {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>, // Tool call ID for providers that need it (like Anthropic)
     pub function: Function,
 }
 
