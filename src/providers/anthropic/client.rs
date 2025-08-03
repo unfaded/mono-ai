@@ -2,6 +2,8 @@ use futures_util::{Stream, StreamExt};
 use reqwest::Client;
 use std::error::Error;
 use std::pin::Pin;
+use std::collections::HashMap;
+use bytes::Bytes;
 
 use crate::core::{Message, ToolCall, ChatStreamItem, Tool};
 use super::types::*;
@@ -45,6 +47,26 @@ impl AnthropicClient {
     }
 
     fn convert_to_anthropic_message(&self, message: &Message) -> AnthropicMessage {
+        // Check if this is a tool result message
+        if message.role == "user" && message.content.starts_with("TOOL_RESULT:") {
+            // Parse the encoded tool result: "TOOL_RESULT:tool_id:result_content"
+            let parts: Vec<&str> = message.content.splitn(3, ':').collect();
+            if parts.len() == 3 {
+                let tool_use_id = parts[1];
+                let result_content = parts[2];
+
+                let content_blocks = vec![ContentBlock::ToolResult {
+                    tool_use_id: tool_use_id.to_string(),
+                    content: result_content.to_string(),
+                }];
+
+                return AnthropicMessage {
+                    role: message.role.clone(),
+                    content: content_blocks,
+                };
+            }
+        }
+
         let mut content_blocks = vec![ContentBlock::Text {
             text: message.content.clone(),
         }];
@@ -65,8 +87,9 @@ impl AnthropicClient {
         // Add tool calls if present
         if let Some(tool_calls) = &message.tool_calls {
             for tool_call in tool_calls {
+                let tool_id = tool_call.id.clone().unwrap_or_else(|| format!("call_{}", "generated_id"));
                 content_blocks.push(ContentBlock::ToolUse {
-                    id: format!("call_{}", "generated_id"),
+                    id: tool_id,
                     name: tool_call.function.name.clone(),
                     input: tool_call.function.arguments.clone(),
                 });
@@ -99,6 +122,7 @@ impl AnthropicClient {
             .map(|msg| self.convert_to_anthropic_message(msg))
             .collect();
 
+
         let request = AnthropicRequest {
             model: self.model.clone(),
             max_tokens: 4096,
@@ -130,99 +154,8 @@ impl AnthropicClient {
 
         let stream = response.bytes_stream();
         
-        let processed_stream = stream.map(|chunk_result| {
-            match chunk_result {
-                Ok(chunk) => {
-                    let lines = chunk.split(|&b| b == b'\n');
-                    let mut results = Vec::new();
-
-                    for line in lines {
-                        if line.is_empty() {
-                            continue;
-                        }
-
-                        // Skip "data: " prefix from SSE
-                        let line_str = String::from_utf8_lossy(line);
-                        if line_str.starts_with("data: ") {
-                            let json_str = &line_str[6..];
-                            if json_str.trim() == "[DONE]" {
-                                results.push(Ok(ChatStreamItem {
-                                    content: String::new(),
-                                    tool_calls: None,
-                                    done: true,
-                                }));
-                                continue;
-                            }
-
-                            match serde_json::from_str::<StreamingEvent>(json_str) {
-                                Ok(event) => {
-                                    match event {
-                                        StreamingEvent::ContentBlockDelta { delta, .. } => {
-                                            match delta {
-                                                Delta::TextDelta { text } => {
-                                                    results.push(Ok(ChatStreamItem {
-                                                        content: text,
-                                                        tool_calls: None,
-                                                        done: false,
-                                                    }));
-                                                }
-                                                Delta::InputJsonDelta { .. } => {
-                                                    // Handle tool input streaming if needed
-                                                }
-                                            }
-                                        }
-                                        StreamingEvent::MessageStop => {
-                                            results.push(Ok(ChatStreamItem {
-                                                content: String::new(),
-                                                tool_calls: None,
-                                                done: true,
-                                            }));
-                                        }
-                                        StreamingEvent::ContentBlockStart { content_block, .. } => {
-                                            if let ContentBlock::ToolUse { id: _, name, input } = content_block {
-                                                let tool_call = ToolCall {
-                                                    function: crate::core::Function {
-                                                        name,
-                                                        arguments: input,
-                                                    },
-                                                };
-                                                results.push(Ok(ChatStreamItem {
-                                                    content: String::new(),
-                                                    tool_calls: Some(vec![tool_call]),
-                                                    done: false,
-                                                }));
-                                            }
-                                        }
-                                        StreamingEvent::Ping => {
-                                            // Ignore ping events
-                                        }
-                                        _ => {
-                                            // Handle other event types as needed
-                                        }
-                                    }
-                                }
-                                Err(_e) => {
-                                    // Ignore parsing errors - they're often due to partial JSON chunks
-                                    // which is normal in streaming responses
-                                }
-                            }
-                        }
-                    }
-
-                    Ok(results)
-                }
-                Err(e) => Err(vec![Err(e.to_string())])
-            }
-        });
-
-        let flattened_stream = processed_stream
-            .map(|result| match result {
-                Ok(items) => futures_util::stream::iter(items),
-                Err(errors) => futures_util::stream::iter(errors),
-            })
-            .flatten();
-
-        Ok(Box::pin(flattened_stream))
+        // Create a stateful stream processor
+        Ok(Box::pin(AnthropicStreamProcessor::new(stream)))
     }
 
     pub async fn send_chat_request_no_stream(
@@ -258,9 +191,14 @@ impl AnthropicClient {
             {
                 let result = (tool.function)(tool_call.function.arguments.clone());
                 
+                // Use the tool call ID if available, otherwise use "unknown"
+                let tool_id = tool_call.id.unwrap_or_else(|| "unknown".to_string());
+                
+                // Create a message that can be identified as a tool result
+                // Use the encoded format: TOOL_RESULT:tool_id:result_content
                 tool_responses.push(Message {
                     role: "user".to_string(),
-                    content: result,
+                    content: format!("TOOL_RESULT:{}:{}", tool_id, result),
                     images: None,
                     tool_calls: None,
                 });
@@ -272,5 +210,137 @@ impl AnthropicClient {
     pub async fn process_fallback_response(&self, content: &str) -> (String, Option<Vec<ToolCall>>) {
         // Anthropic doesn't need fallback processing
         (content.to_string(), None)
+    }
+}
+
+// Custom stream processor to handle stateful tool call accumulation
+struct AnthropicStreamProcessor {
+    inner: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>,
+    // Track tool calls being accumulated: tool_id -> (name, accumulated_json)
+    accumulating_tools: HashMap<String, (String, String)>,
+    pending_results: std::collections::VecDeque<Result<ChatStreamItem, String>>,
+}
+
+impl AnthropicStreamProcessor {
+    fn new(stream: impl Stream<Item = Result<Bytes, reqwest::Error>> + Send + 'static) -> Self {
+        Self {
+            inner: Box::pin(stream),
+            accumulating_tools: HashMap::new(),
+            pending_results: std::collections::VecDeque::new(),
+        }
+    }
+}
+
+impl Stream for AnthropicStreamProcessor {
+    type Item = Result<ChatStreamItem, String>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        loop {
+            // Return any pending results first
+            if let Some(result) = self.pending_results.pop_front() {
+                return std::task::Poll::Ready(Some(result));
+            }
+
+            // Poll the inner stream
+            match self.inner.as_mut().poll_next(cx) {
+                std::task::Poll::Ready(Some(chunk_result)) => {
+                    match chunk_result {
+                        Ok(chunk) => {
+                            let lines = chunk.split(|&b| b == b'\n');
+
+                            for line in lines {
+                                if line.is_empty() {
+                                    continue;
+                                }
+
+                                // Skip "data: " prefix from SSE
+                                let line_str = String::from_utf8_lossy(line);
+                                if line_str.starts_with("data: ") {
+                                    let json_str = &line_str[6..];
+                                    if json_str.trim() == "[DONE]" {
+                                        self.pending_results.push_back(Ok(ChatStreamItem {
+                                            content: String::new(),
+                                            tool_calls: None,
+                                            done: true,
+                                        }));
+                                        continue;
+                                    }
+
+                                    if let Ok(event) = serde_json::from_str::<StreamingEvent>(json_str) {
+                                        match event {
+                                            StreamingEvent::ContentBlockDelta { delta, .. } => {
+                                                match delta {
+                                                    Delta::TextDelta { text } => {
+                                                        self.pending_results.push_back(Ok(ChatStreamItem {
+                                                            content: text,
+                                                            tool_calls: None,
+                                                            done: false,
+                                                        }));
+                                                    }
+                                                    Delta::InputJsonDelta { partial_json } => {
+                                                        // Find the most recently added tool (last in iteration order)
+                                                        if let Some((_, accumulated_json)) = self.accumulating_tools.values_mut().last() {
+                                                            accumulated_json.push_str(&partial_json);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            StreamingEvent::ContentBlockStart { content_block, .. } => {
+                                                if let ContentBlock::ToolUse { id, name, input: _ } = content_block {
+                                                    // Start accumulating a new tool call
+                                                    self.accumulating_tools.insert(id, (name, String::new()));
+                                                }
+                                            }
+                                            StreamingEvent::ContentBlockStop { .. } => {
+                                                // Finish all accumulated tool calls
+                                                let mut completed_tools = Vec::new();
+                                                for (tool_id, (tool_name, accumulated_json)) in self.accumulating_tools.drain() {
+                                                    if let Ok(arguments) = serde_json::from_str::<serde_json::Value>(&accumulated_json) {
+                                                        // Create tool call with the ID properly stored
+                                                        let tool_call = ToolCall {
+                                                            id: Some(tool_id),
+                                                            function: crate::core::Function {
+                                                                name: tool_name,
+                                                                arguments,
+                                                            },
+                                                        };
+                                                        completed_tools.push(tool_call);
+                                                    }
+                                                }
+                                                
+                                                if !completed_tools.is_empty() {
+                                                    self.pending_results.push_back(Ok(ChatStreamItem {
+                                                        content: String::new(),
+                                                        tool_calls: Some(completed_tools),
+                                                        done: false,
+                                                    }));
+                                                }
+                                            }
+                                            StreamingEvent::MessageStop => {
+                                                self.pending_results.push_back(Ok(ChatStreamItem {
+                                                    content: String::new(),
+                                                    tool_calls: None,
+                                                    done: true,
+                                                }));
+                                            }
+                                            StreamingEvent::Ping => {
+                                                // Ignore ping events
+                                            }
+                                            _ => {
+                                                // Handle other event types as needed
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // Continue the loop to check for pending results
+                        }
+                        Err(e) => return std::task::Poll::Ready(Some(Err(e.to_string())))
+                    }
+                }
+                std::task::Poll::Ready(None) => return std::task::Poll::Ready(None),
+                std::task::Poll::Pending => return std::task::Poll::Pending,
+            }
+        }
     }
 }
