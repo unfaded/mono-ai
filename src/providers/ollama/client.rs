@@ -206,6 +206,41 @@ impl OllamaClient {
         self.send_chat_request_with_options(&messages_with_images, options).await
     }
 
+    pub async fn send_chat_request_with_image_data(
+        &self,
+        messages: &[Message],
+        image_data: Vec<u8>,
+    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+        self.send_chat_request_with_images_data(messages, vec![image_data]).await
+    }
+
+    pub async fn send_chat_request_with_images_data(
+        &self,
+        messages: &[Message],
+        images_data: Vec<Vec<u8>>,
+    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+        self.send_chat_request_with_images_data_and_options(messages, images_data, None).await
+    }
+
+    pub async fn send_chat_request_with_images_data_and_options(
+        &self,
+        messages: &[Message],
+        images_data: Vec<Vec<u8>>,
+        options: Option<OllamaOptions>,
+    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
+        let mut encoded_images = Vec::new();
+        for image_bytes in images_data {
+            encoded_images.push(general_purpose::STANDARD.encode(image_bytes));
+        }
+
+        let mut messages_with_images = messages.to_vec();
+        if let Some(last_message) = messages_with_images.last_mut() {
+            last_message.images = Some(encoded_images);
+        }
+
+        self.send_chat_request_with_options(&messages_with_images, options).await
+    }
+
     pub async fn send_chat_request(
         &self,
         messages: &[Message],
