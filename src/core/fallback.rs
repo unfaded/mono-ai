@@ -35,6 +35,7 @@ impl FallbackToolHandler {
                         parsed.get("function").and_then(|f| f.get("arguments"))
                     ) {
                         all_tool_calls.push(ToolCall {
+                            id: None, // Fallback mode doesn't have tool IDs
                             function: Function {
                                 name: name.to_string(),
                                 arguments: arguments.clone(),
