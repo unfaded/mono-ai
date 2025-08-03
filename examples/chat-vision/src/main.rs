@@ -26,11 +26,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Using model: {}", model);
     println!("Analyzing image: {}\n", image_path);
 
-    // Create client with vision model
+    // Create client - Choose your provider:
+    
+    // Option 1: Ollama (local vision model)
     let client = UnifiedAI::ollama(
         "http://localhost:11434".to_string(),
         model,
     );
+
+    // For cloud providers: You can hardcode keys instead of using environment variables if preferred
+    // Option 2: Anthropic Claude (requires API key)
+    // let client = UnifiedAI::anthropic(
+    //     std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY not set"),
+    //     "claude-sonnet-4-20250514".to_string(), // Claude has built-in vision
+    // );
+
+    // The rest works identically regardless of provider!
 
     // Encode image for conversation history
     let encoded_image = client.encode_image_file(image_path).await?;
