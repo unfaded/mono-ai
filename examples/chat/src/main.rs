@@ -116,10 +116,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
 
+        // Add assistant response with tool calls to conversation
+        messages.push(Message {
+            role: "assistant".to_string(),
+            content: full_response,
+            images: None,
+            tool_calls: tool_calls.clone(), // Include tool calls in the conversation history
+        });
+
         // Handle tool calls
-        if let Some(tc) = tool_calls {
+        if let Some(ref tc) = tool_calls {
             // Tool execution status (remove these prints for silent operation)
-            for tool_call in &tc {
+            for tool_call in tc {
                 println!("\n{}", format!("Using {} tool...", tool_call.function.name).truecolor(169, 169, 169));
             }
             
@@ -136,26 +144,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             print!("{}: ", client.model());
             io::stdout().flush()?;
             let mut tool_stream = client.send_chat_request(&messages).await?;
+            let mut final_response = String::new();
             while let Some(item) = tool_stream.next().await {
                 let item = item.map_err(|e| format!("Stream error: {}", e))?;
                 if !item.content.is_empty() {
                     print!("{}", item.content);
                     io::stdout().flush()?;
-                    full_response.push_str(&item.content);
+                    final_response.push_str(&item.content);
                 }
                 if item.done {
                     break;
                 }
             }
+            
+            // Add the final assistant response to conversation
+            messages.push(Message {
+                role: "assistant".to_string(),
+                content: final_response,
+                images: None,
+                tool_calls: None,
+            });
         }
-
-        // Add assistant response to conversation
-        messages.push(Message {
-            role: "assistant".to_string(),
-            content: full_response,
-            images: None,
-            tool_calls: None,
-        });
 
         println!();
     }
