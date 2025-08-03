@@ -32,13 +32,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Unified AI Rust Library");
     println!("This demonstrates streaming chat with optional tool calling");
 
-    // Create client
-    let mut client = UnifiedAI::ollama(
-        "http://localhost:11434".to_string(),
-        "qwen3-coder:30b".to_string(),
-    );
+    // Create client - Choose your provider:
+    
+    // Option 1: Ollama (local)
+    //let mut client = UnifiedAI::ollama(
+    //    "http://localhost:11434".to_string(),
+    //    "qwen3-coder:30b".to_string(),
+    //);
 
-    // todo : add further provider examples
+    // For cloud providers: You can hardcode keys instead of using environment variables if preferred
+    // Option 2: Anthropic Claude (requires API key)
+    // let mut client = UnifiedAI::anthropic(
+    //     std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY not set"),
+    //     "claude-sonnet-4-20250514".to_string(),
+    // );
+    
+    let mut client = UnifiedAI::anthropic(
+        std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY not set"),
+        "claude-sonnet-4-20250514".to_string(),
+    );
+    // The rest of the code works exactly the same regardless of provider!
 
     // Add tools (optional) - just comment these out for basic chat
     client.add_tool(get_weather_tool()).await?;
