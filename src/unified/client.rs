@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::pin::Pin;
 use futures_util::Stream;
+use base64::{Engine as _, engine::general_purpose};
 
 use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool};
 use crate::providers::ollama::{OllamaClient, Model};
@@ -217,5 +218,16 @@ impl UnifiedAI {
         match &mut self.provider {
             Provider::Ollama(client) => Some(client),
         }
+    }
+
+    /// Encode image file to base64 string for use in Message.images
+    pub async fn encode_image_file(&self, path: &str) -> Result<String, Box<dyn std::error::Error>> {
+        let image_bytes = std::fs::read(path)?;
+        Ok(general_purpose::STANDARD.encode(image_bytes))
+    }
+
+    /// Encode image bytes to base64 string for use in Message.images
+    pub async fn encode_image_data(&self, bytes: Vec<u8>) -> Result<String, Box<dyn std::error::Error>> {
+        Ok(general_purpose::STANDARD.encode(bytes))
     }
 }
