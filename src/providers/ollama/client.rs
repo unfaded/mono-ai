@@ -206,14 +206,6 @@ impl OllamaClient {
         self.send_chat_request_with_options(&messages_with_images, options).await
     }
 
-    pub async fn send_chat_request_with_image_data(
-        &self,
-        messages: &[Message],
-        image_data: Vec<u8>,
-    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
-        self.send_chat_request_with_images_data(messages, vec![image_data]).await
-    }
-
     pub async fn send_chat_request_with_images_data(
         &self,
         messages: &[Message],

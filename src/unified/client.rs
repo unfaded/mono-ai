@@ -89,17 +89,8 @@ impl UnifiedAI {
         }
     }
 
-    /// Send chat request with image data directly from memory
+    /// Send chat request with image data from memory (single image: vec![data], multiple: vec![data1, data2])
     pub async fn send_chat_request_with_image_data(
-        &self,
-        messages: &[Message],
-        image_data: Vec<u8>,
-    ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
-        self.send_chat_request_with_images_data(messages, vec![image_data]).await
-    }
-
-    /// Send chat request with multiple images from memory
-    pub async fn send_chat_request_with_images_data(
         &self,
         messages: &[Message],
         images_data: Vec<Vec<u8>>,
