@@ -1,0 +1,9 @@
+[package]
+name = "ollama-management"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+unified-ai = { path = "../.." }
+tokio = { version = "1.47.1", features = ["full"] }
+futures-util = "0.3.31"
