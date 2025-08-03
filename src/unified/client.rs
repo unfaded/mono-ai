@@ -1,16 +1,17 @@
 use std::error::Error;
 use std::pin::Pin;
-use futures_util::Stream;
+use futures_util::{Stream, StreamExt};
 use base64::{Engine as _, engine::general_purpose};
 
 use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool};
 use crate::providers::ollama::{OllamaClient, Model};
+use crate::providers::anthropic::AnthropicClient;
 
 pub enum Provider {
     Ollama(OllamaClient),
+    Anthropic(AnthropicClient),
     // Future providers
     // OpenAI(OpenAIClient),
-    // Anthropic(AnthropicClient),
 }
 
 pub struct UnifiedAI {
@@ -25,16 +26,17 @@ impl UnifiedAI {
         }
     }
 
+    /// Create Anthropic client with API key and model name
+    pub fn anthropic(api_key: String, model: String) -> Self {
+        Self {
+            provider: Provider::Anthropic(AnthropicClient::new(api_key, model)),
+        }
+    }
+
     // Future provider constructors
     // pub fn openai(api_key: String, model: String) -> Self {
     //     Self {
     //         provider: Provider::OpenAI(OpenAIClient::new(api_key, model)),
-    //     }
-    // }
-    //
-    // pub fn anthropic(api_key: String, model: String) -> Self {
-    //     Self {
-    //         provider: Provider::Anthropic(AnthropicClient::new(api_key, model)),
     //     }
     // }
 
@@ -42,6 +44,7 @@ impl UnifiedAI {
     pub async fn add_tool(&mut self, tool: Tool) -> Result<(), Box<dyn Error>> {
         match &mut self.provider {
             Provider::Ollama(client) => client.add_tool(tool).await,
+            Provider::Anthropic(client) => client.add_tool(tool).await,
         }
     }
 
@@ -49,6 +52,7 @@ impl UnifiedAI {
     pub async fn is_fallback_mode(&self) -> bool {
         match &self.provider {
             Provider::Ollama(client) => client.is_fallback_mode().await,
+            Provider::Anthropic(client) => client.is_fallback_mode().await,
         }
     }
 
@@ -56,6 +60,7 @@ impl UnifiedAI {
     pub fn set_debug_mode(&mut self, debug: bool) {
         match &mut self.provider {
             Provider::Ollama(client) => client.set_debug_mode(debug),
+            Provider::Anthropic(client) => client.set_debug_mode(debug),
         }
     }
 
@@ -63,6 +68,7 @@ impl UnifiedAI {
     pub fn debug_mode(&self) -> bool {
         match &self.provider {
             Provider::Ollama(client) => client.debug_mode(),
+            Provider::Anthropic(client) => client.debug_mode(),
         }
     }
 
@@ -70,6 +76,7 @@ impl UnifiedAI {
     pub async fn supports_tool_calls(&self) -> Result<bool, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.supports_tool_calls().await,
+            Provider::Anthropic(client) => client.supports_tool_calls().await,
         }
     }
 
@@ -80,6 +87,7 @@ impl UnifiedAI {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.send_chat_request(messages).await,
+            Provider::Anthropic(client) => client.send_chat_request(messages).await,
         }
     }
 
@@ -90,6 +98,7 @@ impl UnifiedAI {
     ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.send_chat_request_no_stream(messages).await,
+            Provider::Anthropic(client) => client.send_chat_request_no_stream(messages).await,
         }
     }
 
@@ -101,6 +110,20 @@ impl UnifiedAI {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.send_chat_request_with_images(messages, image_paths).await,
+            Provider::Anthropic(_) => {
+                // For Anthropic, images should be encoded in the messages directly
+                // This method is provided for backward compatibility with Ollama-style usage
+                let mut messages_with_images = messages.to_vec();
+                if let Some(last_message) = messages_with_images.last_mut() {
+                    let mut encoded_images = Vec::new();
+                    for image_path in image_paths {
+                        let encoded = self.encode_image_file(&image_path).await?;
+                        encoded_images.push(encoded);
+                    }
+                    last_message.images = Some(encoded_images);
+                }
+                self.send_chat_request(&messages_with_images).await
+            }
         }
     }
 
@@ -112,6 +135,19 @@ impl UnifiedAI {
     ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.send_chat_request_with_images_no_stream(messages, image_paths).await,
+            Provider::Anthropic(_) => {
+                // For Anthropic, images should be encoded in the messages directly
+                let mut messages_with_images = messages.to_vec();
+                if let Some(last_message) = messages_with_images.last_mut() {
+                    let mut encoded_images = Vec::new();
+                    for image_path in image_paths {
+                        let encoded = self.encode_image_file(&image_path).await?;
+                        encoded_images.push(encoded);
+                    }
+                    last_message.images = Some(encoded_images);
+                }
+                self.send_chat_request_no_stream(&messages_with_images).await
+            }
         }
     }
 
@@ -123,6 +159,19 @@ impl UnifiedAI {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.send_chat_request_with_images_data(messages, images_data).await,
+            Provider::Anthropic(_) => {
+                // For Anthropic, images should be encoded in the messages directly
+                let mut messages_with_images = messages.to_vec();
+                if let Some(last_message) = messages_with_images.last_mut() {
+                    let mut encoded_images = Vec::new();
+                    for image_data in images_data {
+                        let encoded = self.encode_image_data(image_data).await?;
+                        encoded_images.push(encoded);
+                    }
+                    last_message.images = Some(encoded_images);
+                }
+                self.send_chat_request(&messages_with_images).await
+            }
         }
     }
 
@@ -134,6 +183,19 @@ impl UnifiedAI {
     ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.send_chat_request_with_images_data_no_stream(messages, images_data).await,
+            Provider::Anthropic(_) => {
+                // For Anthropic, images should be encoded in the messages directly
+                let mut messages_with_images = messages.to_vec();
+                if let Some(last_message) = messages_with_images.last_mut() {
+                    let mut encoded_images = Vec::new();
+                    for image_data in images_data {
+                        let encoded = self.encode_image_data(image_data).await?;
+                        encoded_images.push(encoded);
+                    }
+                    last_message.images = Some(encoded_images);
+                }
+                self.send_chat_request_no_stream(&messages_with_images).await
+            }
         }
     }
 
@@ -141,6 +203,17 @@ impl UnifiedAI {
     pub async fn generate(&self, prompt: &str) -> Result<String, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.generate(prompt).await,
+            Provider::Anthropic(client) => {
+                // Convert prompt to messages format for Anthropic
+                let messages = vec![Message {
+                    role: "user".to_string(),
+                    content: prompt.to_string(),
+                    images: None,
+                    tool_calls: None,
+                }];
+                let (response, _) = client.send_chat_request_no_stream(&messages).await?;
+                Ok(response)
+            }
         }
     }
 
@@ -151,6 +224,23 @@ impl UnifiedAI {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<String, String>> + Send>>, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.generate_stream(prompt).await,
+            Provider::Anthropic(client) => {
+                // Convert prompt to messages format for Anthropic and convert stream
+                let messages = vec![Message {
+                    role: "user".to_string(),
+                    content: prompt.to_string(),
+                    images: None,
+                    tool_calls: None,
+                }];
+                let stream = client.send_chat_request(&messages).await?;
+                let mapped_stream = stream.map(|item| {
+                    match item {
+                        Ok(chat_item) => Ok(chat_item.content),
+                        Err(e) => Err(e),
+                    }
+                });
+                Ok(Box::pin(mapped_stream))
+            }
         }
     }
 
@@ -158,6 +248,7 @@ impl UnifiedAI {
     pub async fn list_local_models(&self) -> Result<Vec<Model>, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.list_local_models().await,
+            Provider::Anthropic(_) => Err("list_local_models is not supported for Anthropic provider".into()),
         }
     }
 
@@ -165,6 +256,7 @@ impl UnifiedAI {
     pub async fn show_model_info(&self, model_name: &str) -> Result<ModelInfo, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.show_model_info(model_name).await,
+            Provider::Anthropic(_) => Err("show_model_info is not supported for Anthropic provider".into()),
         }
     }
 
@@ -172,6 +264,7 @@ impl UnifiedAI {
     pub async fn pull_model(&self, model_name: &str) -> Result<(), Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.pull_model(model_name).await,
+            Provider::Anthropic(_) => Err("pull_model is not supported for Anthropic provider".into()),
         }
     }
 
@@ -182,6 +275,7 @@ impl UnifiedAI {
     ) -> Result<Pin<Box<dyn Stream<Item = Result<PullProgress, String>> + Send>>, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.pull_model_stream(model_name).await,
+            Provider::Anthropic(_) => Err("pull_model_stream is not supported for Anthropic provider".into()),
         }
     }
 
@@ -189,6 +283,7 @@ impl UnifiedAI {
     pub async fn handle_tool_calls(&self, tool_calls: Vec<ToolCall>) -> Vec<Message> {
         match &self.provider {
             Provider::Ollama(client) => client.handle_tool_calls(tool_calls).await,
+            Provider::Anthropic(client) => client.handle_tool_calls(tool_calls).await,
         }
     }
 
@@ -196,6 +291,7 @@ impl UnifiedAI {
     pub async fn process_fallback_response(&self, content: &str) -> (String, Option<Vec<ToolCall>>) {
         match &self.provider {
             Provider::Ollama(client) => client.process_fallback_response(content).await,
+            Provider::Anthropic(client) => client.process_fallback_response(content).await,
         }
     }
 
@@ -203,6 +299,7 @@ impl UnifiedAI {
     pub fn model(&self) -> &str {
         match &self.provider {
             Provider::Ollama(client) => &client.model,
+            Provider::Anthropic(client) => &client.model,
         }
     }
 
@@ -210,6 +307,7 @@ impl UnifiedAI {
     pub fn as_ollama(&self) -> Option<&OllamaClient> {
         match &self.provider {
             Provider::Ollama(client) => Some(client),
+            Provider::Anthropic(_) => None,
         }
     }
 
@@ -217,6 +315,23 @@ impl UnifiedAI {
     pub fn as_ollama_mut(&mut self) -> Option<&mut OllamaClient> {
         match &mut self.provider {
             Provider::Ollama(client) => Some(client),
+            Provider::Anthropic(_) => None,
+        }
+    }
+
+    /// Access underlying Anthropic client for provider-specific operations
+    pub fn as_anthropic(&self) -> Option<&AnthropicClient> {
+        match &self.provider {
+            Provider::Ollama(_) => None,
+            Provider::Anthropic(client) => Some(client),
+        }
+    }
+
+    /// Access underlying Anthropic client mutably for provider-specific operations
+    pub fn as_anthropic_mut(&mut self) -> Option<&mut AnthropicClient> {
+        match &mut self.provider {
+            Provider::Ollama(_) => None,
+            Provider::Anthropic(client) => Some(client),
         }
     }
 
