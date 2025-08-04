@@ -5,11 +5,21 @@ pub struct OpenAIMessage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub content: Option<String>,
+    pub content: Option<serde_json::Value>, // Can be string or array for vision
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<OpenAIToolCall>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OpenAIContentItem {
+    #[serde(rename = "type")]
+    pub content_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
