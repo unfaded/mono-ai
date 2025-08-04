@@ -81,7 +81,7 @@ impl OpenAIClient {
 
             return OpenAIMessage {
                 role: Some(message.role.clone()),
-                content: Some(content),
+                content: Some(serde_json::Value::String(content)),
                 tool_calls: None,
                 tool_call_id,
             };
@@ -103,9 +103,41 @@ impl OpenAIClient {
             None
         };
 
+        // Handle vision messages with images for OpenAI's structured content format
+        let content = if let Some(ref images) = message.images {
+            if !images.is_empty() {
+                // Create structured content array for OpenAI vision API
+                let mut content_items = vec![];
+                
+                // Add text content
+                if !message.content.is_empty() {
+                    content_items.push(serde_json::json!({
+                        "type": "text",
+                        "text": message.content
+                    }));
+                }
+                
+                // Add image content in OpenAI's base64 format
+                for image in images {
+                    content_items.push(serde_json::json!({
+                        "type": "image_url", 
+                        "image_url": {
+                            "url": format!("data:image/jpeg;base64,{}", image)
+                        }
+                    }));
+                }
+                
+                Some(serde_json::Value::Array(content_items))
+            } else {
+                Some(serde_json::Value::String(message.content.clone()))
+            }
+        } else {
+            Some(serde_json::Value::String(message.content.clone()))
+        };
+
         OpenAIMessage {
             role: Some(message.role.clone()),
-            content: Some(message.content.clone()),
+            content,
             tool_calls,
             tool_call_id: None,
         }
@@ -322,8 +354,10 @@ impl Stream for OpenAIStreamProcessor {
                                                     
                                                     // Handle content delta
                                                     if let Some(delta_content) = &delta.content {
-                                                        content = delta_content.clone();
-                                                        self.accumulated_content.push_str(&content);
+                                                        if let Some(text) = delta_content.as_str() {
+                                                            content = text.to_string();
+                                                            self.accumulated_content.push_str(&content);
+                                                        }
                                                     }
                                                     
                                                     // Handle tool call deltas
