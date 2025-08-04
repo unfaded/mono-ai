@@ -4,7 +4,7 @@ use std::io::{self, Write};
 use std::env;
 
 async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
-    println!("\nSelect AI Provider:");
+    println!("Select AI Provider:");
     println!("1. Ollama (local)");
     println!("2. Anthropic (cloud)");
     println!("3. OpenAI (cloud)");
