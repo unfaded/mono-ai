@@ -7,7 +7,8 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
     println!("\nSelect AI Provider:");
     println!("1. Ollama (local)");
     println!("2. Anthropic (cloud)");
-    print!("Enter choice (1-2): ");
+    println!("3. OpenAI (cloud)");
+    print!("Enter choice (1-3): ");
     io::stdout().flush()?;
 
     let mut input = String::new();
@@ -80,7 +81,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
 
                     println!("\nAvailable Anthropic models:");
                     for (i, model) in models.iter().enumerate() {
-                        println!("{}. {} ({})", i + 1, model.display_name, model.id);
+                        println!("{}. {} ({})", i + 1, model.name, model.id);
                     }
 
                     print!("Select model (1-{}): ", models.len());
@@ -95,12 +96,112 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                     }
 
                     let selected_model = &models[model_choice - 1];
-                    println!("\nSelected: {}", selected_model.display_name);
+                    println!("\nSelected: {}", selected_model.name);
 
                     Ok(UnifiedAI::anthropic(api_key, selected_model.id.clone()))
                 }
                 Err(e) => {
                     println!("Failed to fetch Anthropic models: {}", e);
+                    println!("Please check your API key and internet connection");
+                    Err(e)
+                }
+            }
+        }
+        "3" => {
+            // OpenAI provider - try environment variable first
+            let api_key = match std::env::var("OPENAI_API_KEY") {
+                Ok(key) => {
+                    println!("Using OpenAI API key from environment variable");
+                    key
+                }
+                Err(_) => {
+                    print!("Enter OpenAI API key: ");
+                    io::stdout().flush()?;
+                    
+                    let mut input_key = String::new();
+                    io::stdin().read_line(&mut input_key)?;
+                    let input_key = input_key.trim().to_string();
+
+                    if input_key.is_empty() {
+                        return Err("API key cannot be empty".into());
+                    }
+                    input_key
+                }
+            };
+
+            println!("\nFetching available models...");
+            let temp_client = UnifiedAI::openai(api_key.clone(), "temp".to_string());
+            
+            match temp_client.get_available_models().await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        return Err("No models available".into());
+                    }
+
+                    // Filter to show only vision models (GPT-4 variants that support vision)
+                    let vision_models: Vec<_> = models.into_iter()
+                        .filter(|m| m.id.contains("gpt-4") && 
+                            (m.id.contains("vision") || m.id.contains("gpt-4o")))
+                        .collect();
+
+                    if vision_models.is_empty() {
+                        println!("No vision models found, showing all GPT-4 models:");
+                        // Fallback to all GPT-4 models if no specific vision models found
+                        let temp_client = UnifiedAI::openai(api_key.clone(), "temp".to_string());
+                        let all_models = temp_client.get_available_models().await?;
+                        let gpt4_models: Vec<_> = all_models.into_iter()
+                            .filter(|m| m.id.contains("gpt-4") || m.id.contains("o1"))
+                            .collect();
+                        
+                        if gpt4_models.is_empty() {
+                            return Err("No GPT-4 models available".into());
+                        }
+
+                        println!("\nAvailable OpenAI models:");
+                        for (i, model) in gpt4_models.iter().enumerate() {
+                            println!("{}. {} ({})", i + 1, model.name, model.id);
+                        }
+
+                        print!("Select model (1-{}): ", gpt4_models.len());
+                        io::stdout().flush()?;
+
+                        let mut model_input = String::new();
+                        io::stdin().read_line(&mut model_input)?;
+                        let model_choice: usize = model_input.trim().parse().map_err(|_| "Invalid number")?;
+
+                        if model_choice == 0 || model_choice > gpt4_models.len() {
+                            return Err("Invalid model selection".into());
+                        }
+
+                        let selected_model = &gpt4_models[model_choice - 1];
+                        println!("Selected: {}", selected_model.name);
+
+                        Ok(UnifiedAI::openai(api_key, selected_model.id.clone()))
+                    } else {
+                        println!("\nAvailable OpenAI vision models:");
+                        for (i, model) in vision_models.iter().enumerate() {
+                            println!("{}. {} ({})", i + 1, model.name, model.id);
+                        }
+
+                        print!("Select model (1-{}): ", vision_models.len());
+                        io::stdout().flush()?;
+
+                        let mut model_input = String::new();
+                        io::stdin().read_line(&mut model_input)?;
+                        let model_choice: usize = model_input.trim().parse().map_err(|_| "Invalid number")?;
+
+                        if model_choice == 0 || model_choice > vision_models.len() {
+                            return Err("Invalid model selection".into());
+                        }
+
+                        let selected_model = &vision_models[model_choice - 1];
+                        println!("Selected: {}", selected_model.name);
+
+                        Ok(UnifiedAI::openai(api_key, selected_model.id.clone()))
+                    }
+                }
+                Err(e) => {
+                    println!("Failed to fetch OpenAI models: {}", e);
                     println!("Please check your API key and internet connection");
                     Err(e)
                 }
