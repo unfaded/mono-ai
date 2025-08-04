@@ -135,3 +135,20 @@ pub struct ApiError {
     pub error_type: String,
     pub message: String,
 }
+
+#[derive(Deserialize, Debug)]
+pub struct AnthropicModelsResponse {
+    pub data: Vec<AnthropicModel>,
+    pub has_more: bool,
+    pub first_id: Option<String>,
+    pub last_id: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct AnthropicModel {
+    pub id: String,
+    pub display_name: String,
+    #[serde(rename = "type")]
+    pub model_type: String,
+    pub created_at: String,
+}
