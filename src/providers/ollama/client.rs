@@ -89,6 +89,10 @@ impl OllamaClient {
         Ok(response.models)
     }
 
+    pub async fn get_available_models(&self) -> Result<Vec<Model>, Box<dyn Error>> {
+        self.list_local_models().await
+    }
+
     pub async fn show_model_info(&self, model_name: &str) -> Result<ModelInfo, Box<dyn Error>> {
         let response = self
             .client
