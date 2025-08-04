@@ -5,7 +5,7 @@ use base64::{Engine as _, engine::general_purpose};
 
 use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool};
 use crate::providers::ollama::{OllamaClient, Model};
-use crate::providers::anthropic::AnthropicClient;
+use crate::providers::anthropic::{AnthropicClient, AnthropicModel};
 
 pub enum Provider {
     Ollama(OllamaClient),
@@ -249,6 +249,14 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.list_local_models().await,
             Provider::Anthropic(_) => Err("list_local_models is not supported for Anthropic provider".into()),
+        }
+    }
+
+    /// Get available models from the provider
+    pub async fn get_available_models(&self) -> Result<Vec<AnthropicModel>, Box<dyn Error>> {
+        match &self.provider {
+            Provider::Ollama(_) => Err("get_available_models is not supported for Ollama provider - use list_local_models instead".into()),
+            Provider::Anthropic(client) => client.get_available_models().await,
         }
     }
 
