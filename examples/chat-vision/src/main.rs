@@ -3,6 +3,116 @@ use unified_ai::{Message, UnifiedAI};
 use std::io::{self, Write};
 use std::env;
 
+async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
+    println!("\nSelect AI Provider:");
+    println!("1. Ollama (local)");
+    println!("2. Anthropic (cloud)");
+    print!("Enter choice (1-2): ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let choice = input.trim();
+
+    match choice {
+        "1" => {
+            // Ollama provider
+            println!("\nConnecting to Ollama...");
+            let temp_client = UnifiedAI::ollama("http://localhost:11434".to_string(), "temp".to_string());
+            
+            // Get available models
+            match temp_client.list_local_models().await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        println!("No models available. Please pull a model first using 'ollama pull <model_name>'");
+                        return Err("No models available".into());
+                    }
+
+                    println!("\nAvailable local models:");
+                    for (i, model) in models.iter().enumerate() {
+                        println!("{}. {} ({:.1} GB)", i + 1, model.name, model.size as f64 / 1_073_741_824.0);
+                    }
+
+                    print!("Select model (1-{}): ", models.len());
+                    io::stdout().flush()?;
+
+                    let mut model_input = String::new();
+                    io::stdin().read_line(&mut model_input)?;
+                    let model_choice: usize = model_input.trim().parse().map_err(|_| "Invalid number")?;
+
+                    if model_choice == 0 || model_choice > models.len() {
+                        return Err("Invalid model selection".into());
+                    }
+
+                    let selected_model = &models[model_choice - 1];
+                    println!("\nSelected: {}", selected_model.name);
+
+                    Ok(UnifiedAI::ollama("http://localhost:11434".to_string(), selected_model.name.clone()))
+                }
+                Err(e) => {
+                    println!("Failed to connect to Ollama: {}", e);
+                    println!("Make sure Ollama is running on http://localhost:11434");
+                    Err(e)
+                }
+            }
+        }
+        "2" => {
+            // Anthropic provider
+            print!("Enter Anthropic API key: ");
+            io::stdout().flush()?;
+            
+            let mut api_key = String::new();
+            io::stdin().read_line(&mut api_key)?;
+            let api_key = api_key.trim().to_string();
+
+            if api_key.is_empty() {
+                return Err("API key cannot be empty".into());
+            }
+
+            println!("\nFetching available models...");
+            let temp_client = UnifiedAI::anthropic(api_key.clone(), "temp".to_string());
+            
+            match temp_client.get_available_models().await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        return Err("No models available".into());
+                    }
+
+                    println!("\nAvailable Anthropic models:");
+                    for (i, model) in models.iter().enumerate() {
+                        println!("{}. {} ({})", i + 1, model.display_name, model.id);
+                    }
+
+                    print!("Select model (1-{}): ", models.len());
+                    io::stdout().flush()?;
+
+                    let mut model_input = String::new();
+                    io::stdin().read_line(&mut model_input)?;
+                    let model_choice: usize = model_input.trim().parse().map_err(|_| "Invalid number")?;
+
+                    if model_choice == 0 || model_choice > models.len() {
+                        return Err("Invalid model selection".into());
+                    }
+
+                    let selected_model = &models[model_choice - 1];
+                    println!("\nSelected: {}", selected_model.display_name);
+
+                    Ok(UnifiedAI::anthropic(api_key, selected_model.id.clone()))
+                }
+                Err(e) => {
+                    println!("Failed to fetch Anthropic models: {}", e);
+                    println!("Please check your API key and internet connection");
+                    Err(e)
+                }
+            }
+        }
+        _ => {
+            println!("Invalid choice. Exiting.");
+            Err("Invalid provider selection".into())
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
@@ -10,38 +120,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() < 2 {
         println!("Chat Vision Example - Unified AI Library");
         println!("\nUsage:");
-        println!("  chat-vision <image_path>           - Analyze image and start chat");
-        println!("  chat-vision <image_path> <model>   - Use specific model");
+        println!("  chat-vision <image_path>   - Analyze image and start chat");
         return Ok(());
     }
 
     let image_path = &args[1];
-    let model = if args.len() > 2 {
-        args[2].clone()
-    } else {
-        "qwen2.5vl:7b".to_string()
-    };
 
     println!("Chat Vision Example - Unified AI Library");
-    println!("Using model: {}", model);
     println!("Analyzing image: {}\n", image_path);
 
-    // Create client - Choose your provider:
-    
-    // Option 1: Ollama (local vision model)
-    //let client = UnifiedAI::ollama(
-    //    "http://localhost:11434".to_string(),
-    //    model,
-    //);
-
-    // For cloud providers: You can hardcode keys instead of using environment variables if preferred
-    // Option 2: Anthropic Claude (requires API key)
-    let client = UnifiedAI::anthropic(
-        std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY not set"),
-        "claude-sonnet-4-20250514".to_string(), // Claude has built-in vision
-    );
-
-    // The rest works identically regardless of provider!
+    // Provider selection
+    let client = select_provider().await?;
 
     // Encode image for conversation history
     let encoded_image = client.encode_image_file(image_path).await?;

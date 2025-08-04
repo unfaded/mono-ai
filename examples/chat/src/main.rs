@@ -32,27 +32,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Unified AI Rust Library");
     println!("This demonstrates streaming chat with optional tool calling");
 
-    // Create client - Choose your provider:
-    
-    // Option 1: Ollama (local)
-    //let mut client = UnifiedAI::ollama(
-    //    "http://localhost:11434".to_string(),
-    //    "qwen3-coder:30b".to_string(),
-    //);
+    // Provider selection
+    let mut client = select_provider().await?;
 
-    // For cloud providers: You can hardcode keys instead of using environment variables if preferred
-    // Option 2: Anthropic Claude (requires API key)
-    // let mut client = UnifiedAI::anthropic(
-    //     std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY not set"),
-    //     "claude-sonnet-4-20250514".to_string(),
-    // );
+    // the rest of the code below works the same regardless of provider
     
-    let mut client = UnifiedAI::anthropic(
-        std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY not set"),
-        "claude-sonnet-4-20250514".to_string(),
-    );
-    // The rest of the code works exactly the same regardless of provider!
-
     // Add tools (optional) - just comment these out for basic chat
     client.add_tool(get_weather_tool()).await?;
     client.add_tool(generate_password_tool()).await?;
@@ -135,7 +119,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             
             // Show tool results
             for (tool_call, response) in tc.iter().zip(tool_responses.iter()) {
-                println!("{}", format!("{} called, result: {}", tool_call.function.name, response.content).green());
+                // Extract clean result from encoded format for display
+                let clean_result = if response.content.starts_with("TOOL_RESULT:") {
+                    // Parse "TOOL_RESULT:tool_id:actual_result" and extract actual_result
+                    let parts: Vec<&str> = response.content.splitn(3, ':').collect();
+                    if parts.len() == 3 {
+                        parts[2]
+                    } else {
+                        &response.content
+                    }
+                } else {
+                    &response.content
+                };
+                println!("{}", format!("{} called, result: {}", tool_call.function.name, clean_result).green());
             }
             
             messages.extend(tool_responses);
@@ -170,4 +166,122 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
+    println!("\nSelect AI Provider:");
+    println!("1. Ollama (local)");
+    println!("2. Anthropic (cloud)");
+    print!("Enter choice (1-2): ");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    let choice = input.trim();
+
+    match choice {
+        "1" => {
+            // Ollama provider
+            println!("\nConnecting to Ollama...");
+            let temp_client = UnifiedAI::ollama("http://localhost:11434".to_string(), "temp".to_string());
+            
+            // Get available models
+            match temp_client.list_local_models().await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        println!("No models available. Please pull a model first using 'ollama pull <model_name>'");
+                        return Err("No models available".into());
+                    }
+
+                    println!("\nAvailable local models:");
+                    for (i, model) in models.iter().enumerate() {
+                        println!("{}. {} ({:.1} GB)", i + 1, model.name, model.size as f64 / 1_073_741_824.0);
+                    }
+
+                    print!("Select model (1-{}): ", models.len());
+                    io::stdout().flush()?;
+
+                    let mut model_input = String::new();
+                    io::stdin().read_line(&mut model_input)?;
+                    let model_choice: usize = model_input.trim().parse().map_err(|_| "Invalid number")?;
+
+                    if model_choice == 0 || model_choice > models.len() {
+                        return Err("Invalid model selection".into());
+                    }
+
+                    let selected_model = &models[model_choice - 1];
+                    println!("\nSelected: {}", selected_model.name);
+
+                    Ok(UnifiedAI::ollama("http://localhost:11434".to_string(), selected_model.name.clone()))
+                }
+                Err(e) => {
+                    println!("Failed to connect to Ollama: {}", e);
+                    println!("Make sure Ollama is running on http://localhost:11434");
+                    Err(e)
+                }
+            }
+        }
+        "2" => {
+            let api_key = match std::env::var("ANTHROPIC_API_KEY") {
+                Ok(key) => {
+                    println!("Using Anthropic API key from environment variable");
+                    key
+                }
+                Err(_) => {
+                    print!("Enter Anthropic API key: ");
+                    io::stdout().flush()?;
+                    
+                    let mut input_key = String::new();
+                    io::stdin().read_line(&mut input_key)?;
+                    let input_key = input_key.trim().to_string();
+
+                    if input_key.is_empty() {
+                        return Err("API key cannot be empty".into());
+                    }
+                    input_key
+                }
+            };
+
+            println!("\nFetching available models...");
+            let temp_client = UnifiedAI::anthropic(api_key.clone(), "temp".to_string());
+            
+            match temp_client.get_available_models().await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        return Err("No models available".into());
+                    }
+
+                    println!("\nAvailable Anthropic models:");
+                    for (i, model) in models.iter().enumerate() {
+                        println!("{}. {} ({})", i + 1, model.display_name, model.id);
+                    }
+
+                    print!("Select model (1-{}): ", models.len());
+                    io::stdout().flush()?;
+
+                    let mut model_input = String::new();
+                    io::stdin().read_line(&mut model_input)?;
+                    let model_choice: usize = model_input.trim().parse().map_err(|_| "Invalid number")?;
+
+                    if model_choice == 0 || model_choice > models.len() {
+                        return Err("Invalid model selection".into());
+                    }
+
+                    let selected_model = &models[model_choice - 1];
+                    println!("\nSelected: {}", selected_model.display_name);
+
+                    Ok(UnifiedAI::anthropic(api_key, selected_model.id.clone()))
+                }
+                Err(e) => {
+                    println!("Failed to fetch Anthropic models: {}", e);
+                    println!("Please check your API key and internet connection");
+                    Err(e)
+                }
+            }
+        }
+        _ => {
+            println!("Invalid choice. Exiting.");
+            Err("Invalid provider selection".into())
+        }
+    }
 }
