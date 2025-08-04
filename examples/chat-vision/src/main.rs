@@ -8,7 +8,8 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
     println!("1. Ollama (local)");
     println!("2. Anthropic (cloud)");
     println!("3. OpenAI (cloud)");
-    print!("Enter choice (1-3): ");
+    println!("4. OpenRouter (cloud)");
+    print!("Enter choice (1-4): ");
     io::stdout().flush()?;
 
     let mut input = String::new();
@@ -202,6 +203,100 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                 }
                 Err(e) => {
                     println!("Failed to fetch OpenAI models: {}", e);
+                    println!("Please check your API key and internet connection");
+                    Err(e)
+                }
+            }
+        }
+        "4" => {
+            // OpenRouter provider - try environment variable first
+            let api_key = match std::env::var("OPENROUTER_API_KEY") {
+                Ok(key) => {
+                    println!("Using OpenRouter API key from environment variable");
+                    key
+                }
+                Err(_) => {
+                    print!("Enter OpenRouter API key: ");
+                    io::stdout().flush()?;
+                    
+                    let mut input_key = String::new();
+                    io::stdin().read_line(&mut input_key)?;
+                    let input_key = input_key.trim().to_string();
+
+                    if input_key.is_empty() {
+                        return Err("API key cannot be empty".into());
+                    }
+                    input_key
+                }
+            };
+
+            println!("\nFetching available models...");
+            let temp_client = UnifiedAI::openrouter(api_key.clone(), "temp".to_string());
+            
+            match temp_client.get_available_models().await {
+                Ok(models) => {
+                    if models.is_empty() {
+                        return Err("No models available".into());
+                    }
+
+                    // Filter to show vision-capable models 
+                    let vision_models: Vec<_> = models.into_iter()
+                        .filter(|m| {
+                            let id_lower = m.id.to_lowercase();
+                            (id_lower.contains("gpt-4") && (id_lower.contains("vision") || id_lower.contains("gpt-4o"))) ||
+                            id_lower.contains("claude") ||
+                            id_lower.contains("gemini") ||
+                            m.id == "custom"
+                        })
+                        .collect();
+
+                    if vision_models.is_empty() {
+                        return Err("No vision-capable models available".into());
+                    }
+
+                    println!("\nAvailable OpenRouter vision models:");
+                    for (i, model) in vision_models.iter().enumerate() {
+                        println!("{}. {} ({})", i + 1, model.name, model.id);
+                    }
+
+                    // Handle custom model input
+                    if vision_models.iter().any(|m| m.id == "custom") {
+                        println!("\nNote: Select 'Custom Model' to manually enter any OpenRouter vision model ID");
+                    }
+
+                    print!("Select model (1-{}): ", vision_models.len());
+                    io::stdout().flush()?;
+
+                    let mut model_input = String::new();
+                    io::stdin().read_line(&mut model_input)?;
+                    let model_choice: usize = model_input.trim().parse().map_err(|_| "Invalid number")?;
+
+                    if model_choice == 0 || model_choice > vision_models.len() {
+                        return Err("Invalid model selection".into());
+                    }
+
+                    let selected_model = &vision_models[model_choice - 1];
+                    
+                    let final_model_id = if selected_model.id == "custom" {
+                        print!("Enter OpenRouter vision model ID (e.g., anthropic/claude-sonnet-4): ");
+                        io::stdout().flush()?;
+                        let mut custom_model = String::new();
+                        io::stdin().read_line(&mut custom_model)?;
+                        let custom_model = custom_model.trim().to_string();
+                        if custom_model.is_empty() {
+                            return Err("Model ID cannot be empty".into());
+                        }
+                        println!("Selected custom model: {}", custom_model);
+                        custom_model
+                    } else {
+                        println!("Selected: {}", selected_model.name);
+                        selected_model.id.clone()
+                    };
+
+                    Ok(UnifiedAI::openrouter(api_key, final_model_id))
+                }
+                Err(e) => {
+                    println!("Failed to fetch OpenRouter models: {}", e);
                     println!("Please check your API key and internet connection");
                     Err(e)
                 }
