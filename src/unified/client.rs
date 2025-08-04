@@ -3,15 +3,15 @@ use std::pin::Pin;
 use futures_util::{Stream, StreamExt};
 use base64::{Engine as _, engine::general_purpose};
 
-use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool};
+use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool, UnifiedModel};
 use crate::providers::ollama::{OllamaClient, Model};
-use crate::providers::anthropic::{AnthropicClient, AnthropicModel};
+use crate::providers::anthropic::AnthropicClient;
+use crate::providers::openai::OpenAIClient;
 
 pub enum Provider {
     Ollama(OllamaClient),
     Anthropic(AnthropicClient),
-    // Future providers
-    // OpenAI(OpenAIClient),
+    OpenAI(OpenAIClient),
 }
 
 pub struct UnifiedAI {
@@ -33,18 +33,19 @@ impl UnifiedAI {
         }
     }
 
-    // Future provider constructors
-    // pub fn openai(api_key: String, model: String) -> Self {
-    //     Self {
-    //         provider: Provider::OpenAI(OpenAIClient::new(api_key, model)),
-    //     }
-    // }
+    /// Create OpenAI client with API key and model name
+    pub fn openai(api_key: String, model: String) -> Self {
+        Self {
+            provider: Provider::OpenAI(OpenAIClient::new(api_key, model)),
+        }
+    }
 
     /// Add function tool to client. Automatically enables fallback mode for non-supporting models
     pub async fn add_tool(&mut self, tool: Tool) -> Result<(), Box<dyn Error>> {
         match &mut self.provider {
             Provider::Ollama(client) => client.add_tool(tool).await,
             Provider::Anthropic(client) => client.add_tool(tool).await,
+            Provider::OpenAI(client) => client.add_tool(tool).await,
         }
     }
 
@@ -53,6 +54,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.is_fallback_mode().await,
             Provider::Anthropic(client) => client.is_fallback_mode().await,
+            Provider::OpenAI(client) => client.is_fallback_mode().await,
         }
     }
 
@@ -61,6 +63,7 @@ impl UnifiedAI {
         match &mut self.provider {
             Provider::Ollama(client) => client.set_debug_mode(debug),
             Provider::Anthropic(client) => client.set_debug_mode(debug),
+            Provider::OpenAI(client) => client.set_debug_mode(debug),
         }
     }
 
@@ -69,6 +72,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.debug_mode(),
             Provider::Anthropic(client) => client.debug_mode(),
+            Provider::OpenAI(client) => client.debug_mode(),
         }
     }
 
@@ -77,6 +81,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.supports_tool_calls().await,
             Provider::Anthropic(client) => client.supports_tool_calls().await,
+            Provider::OpenAI(client) => client.supports_tool_calls().await,
         }
     }
 
@@ -88,6 +93,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.send_chat_request(messages).await,
             Provider::Anthropic(client) => client.send_chat_request(messages).await,
+            Provider::OpenAI(client) => client.send_chat_request(messages).await,
         }
     }
 
@@ -99,6 +105,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.send_chat_request_no_stream(messages).await,
             Provider::Anthropic(client) => client.send_chat_request_no_stream(messages).await,
+            Provider::OpenAI(client) => client.send_chat_request_no_stream(messages).await,
         }
     }
 
@@ -113,6 +120,19 @@ impl UnifiedAI {
             Provider::Anthropic(_) => {
                 // For Anthropic, images should be encoded in the messages directly
                 // This method is provided for backward compatibility with Ollama-style usage
+                let mut messages_with_images = messages.to_vec();
+                if let Some(last_message) = messages_with_images.last_mut() {
+                    let mut encoded_images = Vec::new();
+                    for image_path in image_paths {
+                        let encoded = self.encode_image_file(&image_path).await?;
+                        encoded_images.push(encoded);
+                    }
+                    last_message.images = Some(encoded_images);
+                }
+                self.send_chat_request(&messages_with_images).await
+            }
+            Provider::OpenAI(_) => {
+                // For OpenAI, images should be encoded in the messages directly
                 let mut messages_with_images = messages.to_vec();
                 if let Some(last_message) = messages_with_images.last_mut() {
                     let mut encoded_images = Vec::new();
@@ -148,6 +168,19 @@ impl UnifiedAI {
                 }
                 self.send_chat_request_no_stream(&messages_with_images).await
             }
+            Provider::OpenAI(_) => {
+                // For OpenAI, images should be encoded in the messages directly
+                let mut messages_with_images = messages.to_vec();
+                if let Some(last_message) = messages_with_images.last_mut() {
+                    let mut encoded_images = Vec::new();
+                    for image_path in image_paths {
+                        let encoded = self.encode_image_file(&image_path).await?;
+                        encoded_images.push(encoded);
+                    }
+                    last_message.images = Some(encoded_images);
+                }
+                self.send_chat_request_no_stream(&messages_with_images).await
+            }
         }
     }
 
@@ -161,6 +194,19 @@ impl UnifiedAI {
             Provider::Ollama(client) => client.send_chat_request_with_images_data(messages, images_data).await,
             Provider::Anthropic(_) => {
                 // For Anthropic, images should be encoded in the messages directly
+                let mut messages_with_images = messages.to_vec();
+                if let Some(last_message) = messages_with_images.last_mut() {
+                    let mut encoded_images = Vec::new();
+                    for image_data in images_data.clone() {
+                        let encoded = self.encode_image_data(image_data).await?;
+                        encoded_images.push(encoded);
+                    }
+                    last_message.images = Some(encoded_images);
+                }
+                self.send_chat_request(&messages_with_images).await
+            }
+            Provider::OpenAI(_) => {
+                // For OpenAI, images should be encoded in the messages directly
                 let mut messages_with_images = messages.to_vec();
                 if let Some(last_message) = messages_with_images.last_mut() {
                     let mut encoded_images = Vec::new();
@@ -188,6 +234,19 @@ impl UnifiedAI {
                 let mut messages_with_images = messages.to_vec();
                 if let Some(last_message) = messages_with_images.last_mut() {
                     let mut encoded_images = Vec::new();
+                    for image_data in images_data.clone() {
+                        let encoded = self.encode_image_data(image_data).await?;
+                        encoded_images.push(encoded);
+                    }
+                    last_message.images = Some(encoded_images);
+                }
+                self.send_chat_request_no_stream(&messages_with_images).await
+            }
+            Provider::OpenAI(_) => {
+                // For OpenAI, images should be encoded in the messages directly
+                let mut messages_with_images = messages.to_vec();
+                if let Some(last_message) = messages_with_images.last_mut() {
+                    let mut encoded_images = Vec::new();
                     for image_data in images_data {
                         let encoded = self.encode_image_data(image_data).await?;
                         encoded_images.push(encoded);
@@ -205,6 +264,17 @@ impl UnifiedAI {
             Provider::Ollama(client) => client.generate(prompt).await,
             Provider::Anthropic(client) => {
                 // Convert prompt to messages format for Anthropic
+                let messages = vec![Message {
+                    role: "user".to_string(),
+                    content: prompt.to_string(),
+                    images: None,
+                    tool_calls: None,
+                }];
+                let (response, _) = client.send_chat_request_no_stream(&messages).await?;
+                Ok(response)
+            }
+            Provider::OpenAI(client) => {
+                // Convert prompt to messages format for OpenAI
                 let messages = vec![Message {
                     role: "user".to_string(),
                     content: prompt.to_string(),
@@ -241,22 +311,67 @@ impl UnifiedAI {
                 });
                 Ok(Box::pin(mapped_stream))
             }
+            Provider::OpenAI(client) => {
+                // Convert prompt to messages format for OpenAI and convert stream
+                let messages = vec![Message {
+                    role: "user".to_string(),
+                    content: prompt.to_string(),
+                    images: None,
+                    tool_calls: None,
+                }];
+                let stream = client.send_chat_request(&messages).await?;
+                let mapped_stream = stream.map(|item| {
+                    match item {
+                        Ok(chat_item) => Ok(chat_item.content),
+                        Err(e) => Err(e),
+                    }
+                });
+                Ok(Box::pin(mapped_stream))
+            }
         }
     }
 
-    /// List locally installed models (provider-specific operation)
+    /// Get available models from any provider
+    pub async fn get_available_models(&self) -> Result<Vec<UnifiedModel>, Box<dyn Error>> {
+        match &self.provider {
+            Provider::Ollama(client) => {
+                let models = client.list_local_models().await?;
+                Ok(models.into_iter().map(|m| UnifiedModel {
+                    id: m.name.clone(),
+                    name: m.name,
+                    provider: "Ollama".to_string(),
+                    size: Some(m.size),
+                    created: None,
+                }).collect())
+            }
+            Provider::Anthropic(client) => {
+                let models = client.get_available_models().await?;
+                Ok(models.into_iter().map(|m| UnifiedModel {
+                    id: m.id.clone(),
+                    name: m.display_name,
+                    provider: "Anthropic".to_string(),
+                    size: None,
+                    created: Some(m.created_at.parse().unwrap_or(0)),
+                }).collect())
+            }
+            Provider::OpenAI(client) => {
+                let models = client.get_available_models().await?;
+                Ok(models.into_iter().map(|m| UnifiedModel {
+                    id: m.id.clone(),
+                    name: m.id,
+                    provider: "OpenAI".to_string(),
+                    size: None,
+                    created: Some(m.created),
+                }).collect())
+            }
+        }
+    }
+
+    /// List locally installed models (legacy method, use get_available_models instead)
     pub async fn list_local_models(&self) -> Result<Vec<Model>, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => client.list_local_models().await,
-            Provider::Anthropic(_) => Err("list_local_models is not supported for Anthropic provider".into()),
-        }
-    }
-
-    /// Get available models from the provider
-    pub async fn get_available_models(&self) -> Result<Vec<AnthropicModel>, Box<dyn Error>> {
-        match &self.provider {
-            Provider::Ollama(_) => Err("get_available_models is not supported for Ollama provider - use list_local_models instead".into()),
-            Provider::Anthropic(client) => client.get_available_models().await,
+            _ => Err("list_local_models is only supported for Ollama provider".into()),
         }
     }
 
@@ -265,6 +380,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.show_model_info(model_name).await,
             Provider::Anthropic(_) => Err("show_model_info is not supported for Anthropic provider".into()),
+            Provider::OpenAI(_) => Err("show_model_info is not supported for OpenAI provider".into()),
         }
     }
 
@@ -273,6 +389,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.pull_model(model_name).await,
             Provider::Anthropic(_) => Err("pull_model is not supported for Anthropic provider".into()),
+            Provider::OpenAI(_) => Err("pull_model is not supported for OpenAI provider".into()),
         }
     }
 
@@ -284,6 +401,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.pull_model_stream(model_name).await,
             Provider::Anthropic(_) => Err("pull_model_stream is not supported for Anthropic provider".into()),
+            Provider::OpenAI(_) => Err("pull_model_stream is not supported for OpenAI provider".into()),
         }
     }
 
@@ -292,6 +410,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.handle_tool_calls(tool_calls).await,
             Provider::Anthropic(client) => client.handle_tool_calls(tool_calls).await,
+            Provider::OpenAI(client) => client.handle_tool_calls(tool_calls).await,
         }
     }
 
@@ -300,6 +419,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => client.process_fallback_response(content).await,
             Provider::Anthropic(client) => client.process_fallback_response(content).await,
+            Provider::OpenAI(client) => client.process_fallback_response(content).await,
         }
     }
 
@@ -308,6 +428,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => &client.model,
             Provider::Anthropic(client) => &client.model,
+            Provider::OpenAI(client) => &client.model,
         }
     }
 
@@ -316,6 +437,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(client) => Some(client),
             Provider::Anthropic(_) => None,
+            Provider::OpenAI(_) => None,
         }
     }
 
@@ -324,6 +446,7 @@ impl UnifiedAI {
         match &mut self.provider {
             Provider::Ollama(client) => Some(client),
             Provider::Anthropic(_) => None,
+            Provider::OpenAI(_) => None,
         }
     }
 
@@ -332,6 +455,7 @@ impl UnifiedAI {
         match &self.provider {
             Provider::Ollama(_) => None,
             Provider::Anthropic(client) => Some(client),
+            Provider::OpenAI(_) => None,
         }
     }
 
@@ -340,6 +464,7 @@ impl UnifiedAI {
         match &mut self.provider {
             Provider::Ollama(_) => None,
             Provider::Anthropic(client) => Some(client),
+            Provider::OpenAI(_) => None,
         }
     }
 
