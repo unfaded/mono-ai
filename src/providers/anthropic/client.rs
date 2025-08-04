@@ -46,6 +46,24 @@ impl AnthropicClient {
         Ok(true) // Anthropic Claude models support native tool calling
     }
 
+    pub async fn get_available_models(&self) -> Result<Vec<AnthropicModel>, Box<dyn Error>> {
+        let response = self
+            .client
+            .get("https://api.anthropic.com/v1/models")
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", "2023-06-01")
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(format!("Anthropic API error: {}", error_text).into());
+        }
+
+        let models_response: AnthropicModelsResponse = response.json().await?;
+        Ok(models_response.data)
+    }
+
     fn convert_to_anthropic_message(&self, message: &Message) -> AnthropicMessage {
         // Check if this is a tool result message
         if message.role == "user" && message.content.starts_with("TOOL_RESULT:") {
