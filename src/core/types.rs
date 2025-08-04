@@ -23,6 +23,15 @@ pub struct Function {
     pub arguments: serde_json::Value,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct UnifiedModel {
+    pub id: String,
+    pub name: String,
+    pub provider: String,
+    pub size: Option<u64>, // Size in bytes for local models
+    pub created: Option<u64>, // Creation timestamp for cloud models
+}
+
 #[derive(Debug)]
 pub struct ChatStreamItem {
     pub content: String,
