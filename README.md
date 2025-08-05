@@ -117,6 +117,10 @@ Use the `#[tool]` macro to define tool functions
 ```rust
 use unified_ai_macros::tool;
 
+/// The AI will see this doc comment
+/// Describe what your tool does and its purpose here
+/// The macro automatically provides parameter names, types, and marks all as required
+/// You should explain what the function returns and provide usage guidance
 #[tool]
 fn my_function(param1: String, param2: i32) -> String {
     format!("Got {} and {}", param1, param2)
