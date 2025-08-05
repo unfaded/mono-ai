@@ -3,7 +3,6 @@
 A provider-agnostic Rust library for interacting with AI services. Switch between Ollama, Anthropic, OpenAI, and OpenRouter with identical code.
 
 [![Crates.io](https://img.shields.io/crates/v/unified-ai.svg)](https://crates.io/crates/unified-ai)
-[![Documentation](https://docs.rs/unified-a/badge.svg)](https://docs.rs/unified-ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
