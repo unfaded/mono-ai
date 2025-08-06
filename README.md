@@ -106,7 +106,7 @@ let client = MonoAI::openrouter(api_key, "anthropic/claude-sonnet-4".to_string()
 - `process_fallback_response(content)` - Parse fallback tool calls
 
 #### Model Methods
-- `get_available_models()` - List available models (unified format)
+- `get_available_models()` - List available models (works with all providers)
 
 #### Ollama Management
 - `show_model_info(model)` - Get model details (Ollama only)  
