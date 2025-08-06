@@ -1,6 +1,6 @@
 use futures_util::StreamExt;
-use unified_ai::{Message, UnifiedAI};
-use unified_ai_macros::tool;
+use mono_ai::{Message, MonoAI};
+use mono_ai_macros::tool;
 use std::io::{self, Write};
 use colored::*;
 
@@ -29,7 +29,7 @@ fn generate_password(length: usize) -> String {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("Unified AI Rust Library");
+    println!("Mono AI Rust Library");
     println!("This demonstrates streaming chat with optional tool calling");
 
     // Provider selection
@@ -168,7 +168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
+async fn select_provider() -> Result<MonoAI, Box<dyn std::error::Error>> {
     println!("Select AI Provider:");
     println!("1. Ollama (local)");
     println!("2. Anthropic (cloud)");
@@ -185,7 +185,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
         "1" => {
             // Ollama provider
             println!("\nConnecting to Ollama...");
-            let temp_client = UnifiedAI::ollama("http://localhost:11434".to_string(), "temp".to_string());
+            let temp_client = MonoAI::ollama("http://localhost:11434".to_string(), "temp".to_string());
             
             // Get available models
             match temp_client.list_local_models().await {
@@ -214,7 +214,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                     let selected_model = &models[model_choice - 1];
                     println!("\nSelected: {}", selected_model.name);
 
-                    Ok(UnifiedAI::ollama("http://localhost:11434".to_string(), selected_model.name.clone()))
+                    Ok(MonoAI::ollama("http://localhost:11434".to_string(), selected_model.name.clone()))
                 }
                 Err(e) => {
                     println!("Failed to connect to Ollama: {}", e);
@@ -245,7 +245,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
             };
 
             println!("\nFetching available models...");
-            let temp_client = UnifiedAI::anthropic(api_key.clone(), "temp".to_string());
+            let temp_client = MonoAI::anthropic(api_key.clone(), "temp".to_string());
             
             match temp_client.get_available_models().await {
                 Ok(models) => {
@@ -272,7 +272,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                     let selected_model = &models[model_choice - 1];
                     println!("\nSelected: {}", selected_model.name);
 
-                    Ok(UnifiedAI::anthropic(api_key, selected_model.id.clone()))
+                    Ok(MonoAI::anthropic(api_key, selected_model.id.clone()))
                 }
                 Err(e) => {
                     println!("Failed to fetch Anthropic models: {}", e);
@@ -304,7 +304,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
             };
 
             println!("\nFetching available models...");
-            let temp_client = UnifiedAI::openai(api_key.clone(), "temp".to_string());
+            let temp_client = MonoAI::openai(api_key.clone(), "temp".to_string());
             
             match temp_client.get_available_models().await {
                 Ok(models) => {
@@ -340,7 +340,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                     let selected_model = &chat_models[model_choice - 1];
                     println!("Selected: {}", selected_model.name);
 
-                    Ok(UnifiedAI::openai(api_key, selected_model.id.clone()))
+                    Ok(MonoAI::openai(api_key, selected_model.id.clone()))
                 }
                 Err(e) => {
                     println!("Failed to fetch OpenAI models: {}", e);
@@ -372,7 +372,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
             };
 
             println!("\nFetching available models...");
-            let temp_client = UnifiedAI::openrouter(api_key.clone(), "temp".to_string());
+            let temp_client = MonoAI::openrouter(api_key.clone(), "temp".to_string());
             
             match temp_client.get_available_models().await {
                 Ok(models) => {
@@ -419,7 +419,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                         selected_model.id.clone()
                     };
 
-                    Ok(UnifiedAI::openrouter(api_key, final_model_id))
+                    Ok(MonoAI::openrouter(api_key, final_model_id))
                 }
                 Err(e) => {
                     println!("Failed to fetch OpenRouter models: {}", e);

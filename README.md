@@ -1,13 +1,13 @@
-# Unified AI
+# Mono AI
 
 A provider-agnostic Rust library for interacting with AI services. Switch between Ollama, Anthropic, OpenAI, and OpenRouter with identical code.
 
-[![Crates.io](https://img.shields.io/crates/v/unified-ai.svg)](https://crates.io/crates/unified-ai)
+[![Crates.io](https://img.shields.io/crates/v/mono-ai.svg)](https://crates.io/crates/mono-ai)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Features
 
-- Universal Interface: Same API across all AI providers
+- Single Interface: Same API across all AI providers
 - Streaming Support: Real-time response streaming
 - Vision Capabilities: Image analysis and multimodal conversations  
 - Tool Calling: Function execution with automatic fallback for unsupported models
@@ -17,13 +17,13 @@ A provider-agnostic Rust library for interacting with AI services. Switch betwee
 
 ## Supported Providers
 
-Ollama, Anthropic, OpenAI, and OpenRouter all support chat, streaming, vision, tools, and model management through the same unified interface.
+Ollama, Anthropic, OpenAI, and OpenRouter all support chat, streaming, vision, tools, and model management through the same interface.
 
 ## Quick Start
 
 Add library:
 ```bash
-cargo add unified-ai unified-ai-macros
+cargo add mono-ai mono-ai-macros
 ```
 
 Add dependencies:
@@ -76,12 +76,12 @@ cd examples/ollama-management && cargo run
 Besides constructing the client, the rest of the code is provider agnostic.
 ```rust
 // Local Ollama instance
-let client = UnifiedAI::ollama("http://localhost:11434".to_string(), "qwen3:8b".to_string());
+let client = MonoAI::ollama("http://localhost:11434".to_string(), "qwen3:8b".to_string());
 
 // Cloud providers
-let client = UnifiedAI::openai(api_key, "gpt-4".to_string());
-let client = UnifiedAI::anthropic(api_key, "claude-3-sonnet-20240229".to_string());
-let client = UnifiedAI::openrouter(api_key, "anthropic/claude-sonnet-4".to_string());
+let client = MonoAI::openai(api_key, "gpt-4".to_string());
+let client = MonoAI::anthropic(api_key, "claude-3-sonnet-20240229".to_string());
+let client = MonoAI::openrouter(api_key, "anthropic/claude-sonnet-4".to_string());
 ```
 
 ### Core Methods
@@ -118,7 +118,7 @@ let client = UnifiedAI::openrouter(api_key, "anthropic/claude-sonnet-4".to_strin
 Use the `#[tool]` macro to define tool functions
 
 ```rust
-use unified_ai_macros::tool;
+use mono_ai_macros::tool;
 
 /// The AI will see this doc comment
 /// Describe what your tool does and its purpose here

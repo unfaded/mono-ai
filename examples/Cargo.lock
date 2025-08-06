@@ -104,11 +104,11 @@ version = "0.1.0"
 dependencies = [
  "colored",
  "futures-util",
+ "mono-ai",
+ "mono-ai-macros",
  "rand",
  "serde_json",
  "tokio",
- "unified-ai",
- "unified-ai-macros",
 ]
 
 [[package]]
@@ -116,8 +116,8 @@ name = "chat-vision"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "mono-ai",
  "tokio",
- "unified-ai",
 ]
 
 [[package]]
@@ -677,6 +677,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "mono-ai"
+version = "2.0.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "bytes",
+ "futures-util",
+ "rand",
+ "regex",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "mono-ai-macros"
+version = "2.0.0"
+dependencies = [
+ "quote",
+ "serde_json",
+ "syn",
+]
+
+[[package]]
 name = "native-tls"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -707,8 +733,8 @@ name = "ollama-management"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "mono-ai",
  "tokio",
- "unified-ai",
 ]
 
 [[package]]
@@ -1128,9 +1154,9 @@ checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
 name = "signal-hook-registry"
-version = "1.4.5"
+version = "1.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9203b8055f63a2a00e2f593bb0510367fe707d7ff1e5c872de2f537b339e5410"
+checksum = "b2a4719bff48cee6b39d12c020eeb490953ad2443b7055bd0b21fca26bd8c28b"
 dependencies = [
  "libc",
 ]
@@ -1297,9 +1323,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.15"
+version = "0.7.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66a539a9ad6d5d281510d5bd368c973d636c02dbf8a67300bfb6b950696ad7df"
+checksum = "14307c986784f72ef81c89db7d9e28d6ac26d16213b109ea501696195e6e3ce5"
 dependencies = [
  "bytes",
  "futures-core",
@@ -1383,32 +1409,6 @@ name = "unicode-ident"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a5f39404a5da50712a4c1eecf25e90dd62b613502b7e925fd4e4d19b5c96512"
-
-[[package]]
-name = "unified-ai"
-version = "2.0.0"
-dependencies = [
- "anyhow",
- "base64",
- "bytes",
- "futures-util",
- "rand",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "unified-ai-macros"
-version = "1.1.1"
-dependencies = [
- "quote",
- "serde_json",
- "syn",
-]
 
 [[package]]
 name = "untrusted"
@@ -1858,9 +1858,9 @@ dependencies = [
 
 [[package]]
 name = "zerovec"
-version = "0.11.2"
+version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a05eb080e015ba39cc9e23bbe5e7fb04d5fb040350f99f34e338d5fdd294428"
+checksum = "e7aa2bd55086f1ab526693ecbe444205da57e25f4489879da80635a46d90e73b"
 dependencies = [
  "yoke",
  "zerofrom",

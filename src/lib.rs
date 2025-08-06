@@ -1,9 +1,9 @@
 pub mod core;
 pub mod providers;
-pub mod unified;
+pub mod mono;
 
 // Re-export core types
-pub use core::{Message, ToolCall, Function, ChatStreamItem, PullProgress, ModelInfo, Tool, FallbackToolHandler, AIRequestError, UnifiedModel};
+pub use core::{Message, ToolCall, Function, ChatStreamItem, PullProgress, ModelInfo, Tool, FallbackToolHandler, AIRequestError, MonoModel};
 
-// Main unified interface
-pub use unified::UnifiedAI;
+// Main interface
+pub use mono::MonoAI;

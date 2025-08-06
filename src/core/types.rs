@@ -24,7 +24,7 @@ pub struct Function {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct UnifiedModel {
+pub struct MonoModel {
     pub id: String,
     pub name: String,
     pub provider: String,

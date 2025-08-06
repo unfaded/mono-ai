@@ -1,9 +1,9 @@
 use futures_util::StreamExt;
-use unified_ai::{Message, UnifiedAI};
+use mono_ai::{Message, MonoAI};
 use std::io::{self, Write};
 use std::env;
 
-async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
+async fn select_provider() -> Result<MonoAI, Box<dyn std::error::Error>> {
     println!("Select AI Provider:");
     println!("1. Ollama (local)");
     println!("2. Anthropic (cloud)");
@@ -20,7 +20,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
         "1" => {
             // Ollama provider
             println!("\nConnecting to Ollama...");
-            let temp_client = UnifiedAI::ollama("http://localhost:11434".to_string(), "temp".to_string());
+            let temp_client = MonoAI::ollama("http://localhost:11434".to_string(), "temp".to_string());
             
             // Get available models
             match temp_client.list_local_models().await {
@@ -49,7 +49,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                     let selected_model = &models[model_choice - 1];
                     println!("\nSelected: {}", selected_model.name);
 
-                    Ok(UnifiedAI::ollama("http://localhost:11434".to_string(), selected_model.name.clone()))
+                    Ok(MonoAI::ollama("http://localhost:11434".to_string(), selected_model.name.clone()))
                 }
                 Err(e) => {
                     println!("Failed to connect to Ollama: {}", e);
@@ -72,7 +72,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
             }
 
             println!("\nFetching available models...");
-            let temp_client = UnifiedAI::anthropic(api_key.clone(), "temp".to_string());
+            let temp_client = MonoAI::anthropic(api_key.clone(), "temp".to_string());
             
             match temp_client.get_available_models().await {
                 Ok(models) => {
@@ -99,7 +99,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                     let selected_model = &models[model_choice - 1];
                     println!("\nSelected: {}", selected_model.name);
 
-                    Ok(UnifiedAI::anthropic(api_key, selected_model.id.clone()))
+                    Ok(MonoAI::anthropic(api_key, selected_model.id.clone()))
                 }
                 Err(e) => {
                     println!("Failed to fetch Anthropic models: {}", e);
@@ -131,7 +131,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
             };
 
             println!("\nFetching available models...");
-            let temp_client = UnifiedAI::openai(api_key.clone(), "temp".to_string());
+            let temp_client = MonoAI::openai(api_key.clone(), "temp".to_string());
             
             match temp_client.get_available_models().await {
                 Ok(models) => {
@@ -148,7 +148,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                     if vision_models.is_empty() {
                         println!("No vision models found, showing all GPT-4 models:");
                         // Fallback to all GPT-4 models if no specific vision models found
-                        let temp_client = UnifiedAI::openai(api_key.clone(), "temp".to_string());
+                        let temp_client = MonoAI::openai(api_key.clone(), "temp".to_string());
                         let all_models = temp_client.get_available_models().await?;
                         let gpt4_models: Vec<_> = all_models.into_iter()
                             .filter(|m| m.id.contains("gpt-4") || m.id.contains("o1"))
@@ -177,7 +177,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                         let selected_model = &gpt4_models[model_choice - 1];
                         println!("Selected: {}", selected_model.name);
 
-                        Ok(UnifiedAI::openai(api_key, selected_model.id.clone()))
+                        Ok(MonoAI::openai(api_key, selected_model.id.clone()))
                     } else {
                         println!("\nAvailable OpenAI vision models:");
                         for (i, model) in vision_models.iter().enumerate() {
@@ -198,7 +198,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                         let selected_model = &vision_models[model_choice - 1];
                         println!("Selected: {}", selected_model.name);
 
-                        Ok(UnifiedAI::openai(api_key, selected_model.id.clone()))
+                        Ok(MonoAI::openai(api_key, selected_model.id.clone()))
                     }
                 }
                 Err(e) => {
@@ -231,7 +231,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
             };
 
             println!("\nFetching available models...");
-            let temp_client = UnifiedAI::openrouter(api_key.clone(), "temp".to_string());
+            let temp_client = MonoAI::openrouter(api_key.clone(), "temp".to_string());
             
             match temp_client.get_available_models().await {
                 Ok(models) => {
@@ -293,7 +293,7 @@ async fn select_provider() -> Result<UnifiedAI, Box<dyn std::error::Error>> {
                         selected_model.id.clone()
                     };
 
-                    Ok(UnifiedAI::openrouter(api_key, final_model_id))
+                    Ok(MonoAI::openrouter(api_key, final_model_id))
                 }
                 Err(e) => {
                     println!("Failed to fetch OpenRouter models: {}", e);
@@ -314,7 +314,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     
     if args.len() < 2 {
-        println!("Chat Vision Example - Unified AI Library");
+        println!("Chat Vision Example - Mono AI Library");
         println!("\nUsage:");
         println!("  chat-vision <image_path>   - Analyze image and start chat");
         return Ok(());
@@ -322,7 +322,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let image_path = &args[1];
 
-    println!("Chat Vision Example - Unified AI Library");
+    println!("Chat Vision Example - Mono AI Library");
     println!("Analyzing image: {}\n", image_path);
 
     // Provider selection

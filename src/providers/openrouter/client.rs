@@ -1,4 +1,4 @@
-use crate::core::{Message, ChatStreamItem, ToolCall, Tool, UnifiedModel};
+use crate::core::{Message, ChatStreamItem, ToolCall, Tool, MonoModel};
 use super::types::*;
 use reqwest::Client;
 use serde_json::json;
@@ -187,30 +187,30 @@ impl OpenRouterClient {
         Ok(true)
     }
 
-    pub async fn get_available_models(&self) -> Result<Vec<UnifiedModel>, Box<dyn std::error::Error>> {
+    pub async fn get_available_models(&self) -> Result<Vec<MonoModel>, Box<dyn std::error::Error>> {
         Ok(vec![
-            UnifiedModel {
+            MonoModel {
                 id: "anthropic/claude-sonnet-4".to_string(),
                 name: "Claude Sonnet 4".to_string(),
                 provider: "OpenRouter".to_string(),
                 size: None,
                 created: None,
             },
-            UnifiedModel {
+            MonoModel {
                 id: "moonshotai/kimi-k2".to_string(),
                 name: "Kimi K2".to_string(),
                 provider: "OpenRouter".to_string(),
                 size: None,
                 created: None,
             },
-            UnifiedModel {
+            MonoModel {
                 id: "qwen/qwen3-coder:free".to_string(),
                 name: "Qwen 3 Coder".to_string(),
                 provider: "OpenRouter".to_string(),
                 size: None,
                 created: None,
             },
-            UnifiedModel {
+            MonoModel {
                 id: "custom".to_string(),
                 name: "Custom Model".to_string(),
                 provider: "OpenRouter".to_string(),

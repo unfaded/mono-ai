@@ -1,5 +1,5 @@
 use futures_util::StreamExt;
-use unified_ai::UnifiedAI;
+use mono_ai::MonoAI;
 use std::env;
 
 #[tokio::main]
@@ -7,7 +7,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
 
     if args.len() < 2 {
-        println!("Ollama Management Example - Unified AI Library");
+        println!("Ollama Management Example - Mono AI Library");
         println!("This demonstrates Ollama-specific model management operations");
         println!("\nUsage:");
         println!("  cargo run list                    - List local models");
@@ -28,7 +28,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "list" => {
             println!("Listing local Ollama models...\n");
             
-            let client = UnifiedAI::ollama("http://localhost:11434".to_string(), "".to_string());
+            let client = MonoAI::ollama("http://localhost:11434".to_string(), "".to_string());
             let models = client.list_local_models().await?;
             
             if models.is_empty() {
@@ -52,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let model_name = &args[2];
             println!("Downloading model: {}\n", model_name);
 
-            let client = UnifiedAI::ollama("http://localhost:11434".to_string(), "".to_string());
+            let client = MonoAI::ollama("http://localhost:11434".to_string(), "".to_string());
             let mut stream = client.pull_model_stream(model_name).await?;
 
             while let Some(progress) = stream.next().await {
@@ -82,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let model_name = &args[2];
             println!("Getting information for model: {}\n", model_name);
 
-            let client = UnifiedAI::ollama("http://localhost:11434".to_string(), model_name.to_string());
+            let client = MonoAI::ollama("http://localhost:11434".to_string(), model_name.to_string());
             let info = client.show_model_info(model_name).await?;
 
             println!("Model Information:");

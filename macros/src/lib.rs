@@ -80,10 +80,10 @@ pub fn tool(_attr: TokenStream, item: TokenStream) -> TokenStream {
     .to_string();
 
     let expanded = quote! {
-        pub fn #tool_func_name() -> unified_ai::Tool {
+        pub fn #tool_func_name() -> mono_ai::Tool {
             #func
 
-            unified_ai::Tool {
+            mono_ai::Tool {
                 name: #func_name_str.to_string(),
                 description: #description.to_string(),
                 parameters: serde_json::from_str(#parameters_json).unwrap(),

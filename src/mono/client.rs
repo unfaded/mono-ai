@@ -3,7 +3,7 @@ use std::pin::Pin;
 use futures_util::{Stream, StreamExt};
 use base64::{Engine as _, engine::general_purpose};
 
-use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool, UnifiedModel};
+use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool, MonoModel};
 use crate::providers::ollama::{OllamaClient, Model};
 use crate::providers::anthropic::AnthropicClient;
 use crate::providers::openai::OpenAIClient;
@@ -16,11 +16,11 @@ pub enum Provider {
     OpenRouter(OpenRouterClient),
 }
 
-pub struct UnifiedAI {
+pub struct MonoAI {
     provider: Provider,
 }
 
-impl UnifiedAI {
+impl MonoAI {
     /// Create Ollama client with endpoint URL and model name
     pub fn ollama(endpoint: String, model: String) -> Self {
         Self {
@@ -428,11 +428,11 @@ impl UnifiedAI {
     }
 
     /// Get available models from any provider
-    pub async fn get_available_models(&self) -> Result<Vec<UnifiedModel>, Box<dyn Error>> {
+    pub async fn get_available_models(&self) -> Result<Vec<MonoModel>, Box<dyn Error>> {
         match &self.provider {
             Provider::Ollama(client) => {
                 let models = client.list_local_models().await?;
-                Ok(models.into_iter().map(|m| UnifiedModel {
+                Ok(models.into_iter().map(|m| MonoModel {
                     id: m.name.clone(),
                     name: m.name,
                     provider: "Ollama".to_string(),
@@ -442,7 +442,7 @@ impl UnifiedAI {
             }
             Provider::Anthropic(client) => {
                 let models = client.get_available_models().await?;
-                Ok(models.into_iter().map(|m| UnifiedModel {
+                Ok(models.into_iter().map(|m| MonoModel {
                     id: m.id.clone(),
                     name: m.display_name,
                     provider: "Anthropic".to_string(),
@@ -452,7 +452,7 @@ impl UnifiedAI {
             }
             Provider::OpenAI(client) => {
                 let models = client.get_available_models().await?;
-                Ok(models.into_iter().map(|m| UnifiedModel {
+                Ok(models.into_iter().map(|m| MonoModel {
                     id: m.id.clone(),
                     name: m.id,
                     provider: "OpenAI".to_string(),
