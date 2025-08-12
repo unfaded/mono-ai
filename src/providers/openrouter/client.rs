@@ -188,36 +188,33 @@ impl OpenRouterClient {
     }
 
     pub async fn get_available_models(&self) -> Result<Vec<MonoModel>, Box<dyn std::error::Error>> {
-        Ok(vec![
-            MonoModel {
-                id: "anthropic/claude-sonnet-4".to_string(),
-                name: "Claude Sonnet 4".to_string(),
+        let response = self
+            .client
+            .get(&format!("{}/models", self.base_url))
+            .header("Authorization", &format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(format!("OpenRouter API error: {}", error_text).into());
+        }
+
+        let openrouter_response: OpenRouterModelsResponse = response.json().await?;
+        
+        let models = openrouter_response.data
+            .into_iter()
+            .map(|model| MonoModel {
+                id: model.id,
+                name: model.name,
                 provider: "OpenRouter".to_string(),
                 size: None,
                 created: None,
-            },
-            MonoModel {
-                id: "moonshotai/kimi-k2".to_string(),
-                name: "Kimi K2".to_string(),
-                provider: "OpenRouter".to_string(),
-                size: None,
-                created: None,
-            },
-            MonoModel {
-                id: "qwen/qwen3-coder:free".to_string(),
-                name: "Qwen 3 Coder".to_string(),
-                provider: "OpenRouter".to_string(),
-                size: None,
-                created: None,
-            },
-            MonoModel {
-                id: "custom".to_string(),
-                name: "Custom Model".to_string(),
-                provider: "OpenRouter".to_string(),
-                size: None,
-                created: None,
-            },
-        ])
+            })
+            .collect();
+
+        Ok(models)
     }
 
     fn convert_messages(&self, messages: &[Message], images: &[String]) -> Vec<OpenRouterMessage> {
