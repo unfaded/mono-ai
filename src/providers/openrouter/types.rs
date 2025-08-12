@@ -106,3 +106,17 @@ pub struct OpenRouterImageUrl {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OpenRouterModel {
+    pub id: String,
+    pub name: String,
+    // We only need id and name, but include the rest as serde_json::Value to avoid parsing errors
+    #[serde(flatten)]
+    pub _extra: serde_json::Value,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OpenRouterModelsResponse {
+    pub data: Vec<OpenRouterModel>,
+}
