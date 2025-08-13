@@ -1,7 +1,7 @@
 [package]
 name = "mono-ai"
 edition = "2024"
-version = "2.0.0"
+version = "2.1.0"
 description = "Provider-agnostic Rust AI library"
 repository = "https://github.com/unfaded/mono-ai"
 readme = "README.md"
