@@ -5,7 +5,7 @@ use serde_json::json;
 use std::error::Error;
 use std::pin::Pin;
 
-use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool, FallbackToolHandler};
+use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, Tool, FallbackToolHandler, TokenUsage};
 use super::{OllamaOptions, ChatResponse, Model, ListModelsResponse};
 use super::utilities::StreamingXmlFilter;
 
@@ -433,10 +433,28 @@ impl OllamaClient {
                                                 stream_done = true;
                                             }
                                             
+                                            // Extract token usage if available (usually only on done=true)
+                                            let usage = if chat_response.done {
+                                                if let (Some(prompt_tokens), Some(completion_tokens)) = 
+                                                    (chat_response.prompt_eval_count, chat_response.eval_count) {
+                                                    Some(TokenUsage {
+                                                        prompt_tokens: Some(prompt_tokens),
+                                                        completion_tokens: Some(completion_tokens),
+                                                        total_tokens: Some(prompt_tokens + completion_tokens),
+                                                        cost_usd: None,
+                                                    })
+                                                } else {
+                                                    None
+                                                }
+                                            } else {
+                                                None
+                                            };
+                                            
                                             results.push(Ok(ChatStreamItem {
                                                 content,
                                                 tool_calls,
                                                 done: chat_response.done,
+                                                usage,
                                             }));
                                         }
                                         Err(e) => {
