@@ -49,9 +49,18 @@ pub struct OpenAIRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_completion_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<OpenAITool>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stream: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<OpenAIStreamOptions>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OpenAIStreamOptions {
+    pub include_usage: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -104,6 +113,8 @@ pub struct OpenAIStreamChunk {
     pub created: u64,
     pub model: String,
     pub choices: Vec<OpenAIChoice>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<OpenAIUsage>,
 }
 
 #[derive(Deserialize, Debug)]
