@@ -84,29 +84,32 @@ let client = MonoAI::anthropic(api_key, "claude-3-sonnet-20240229".to_string());
 let client = MonoAI::openrouter(api_key, "anthropic/claude-sonnet-4".to_string());
 ```
 
-### Core Methods
+### Core
 
-#### Chat Methods
+#### Chat
 - `send_chat_request(&messages)` - Streaming chat
 - `send_chat_request_no_stream(&messages)` - Complete response
 - `generate(prompt)` - Simple completion
 - `generate_stream(prompt)` - Streaming completion
 
-#### Vision Methods  
+#### Vision  
 - `send_chat_request_with_images(&messages, image_paths)` - Chat with images from files
 - `send_chat_request_with_image_data(&messages, image_data)` - Chat with image bytes
 - `encode_image_file(path)` - Encode image file to base64
 - `encode_image_data(bytes)` - Encode image bytes to base64
 
-#### Tool Methods
+#### Tool
 - `add_tool(tool)` - Add function tool
 - `handle_tool_calls(tool_calls)` - Execute tools and format responses
 - `supports_tool_calls()` - Check native tool support
 - `is_fallback_mode()` - Check if using XML fallback
 - `process_fallback_response(content)` - Parse fallback tool calls
 
-#### Model Methods
+#### Model
 - `get_available_models()` - List available models (works with all providers)
+
+#### Usage Tracking
+- Token usage automatically tracked in streaming responses via `ChatStreamItem.usage`
 
 #### Ollama Management
 - `show_model_info(model)` - Get model details (Ollama only)  
@@ -134,6 +137,32 @@ client.add_tool(my_function_tool()).await?;
 ```
 
 ## Advanced Features
+
+### Token Usage Tracking
+
+All providers support automatic token usage tracking in streaming responses:
+
+```rust
+let mut stream = client.send_chat_request(&messages).await?;
+while let Some(item) = stream.next().await {
+    let item = item?;
+    
+    // Token usage is available in the final stream item
+    if let Some(usage) = item.usage {
+        println!("Usage: {} input + {} output = {} total tokens", 
+            usage.prompt_tokens.unwrap_or(0),
+            usage.completion_tokens.unwrap_or(0),
+            usage.total_tokens.unwrap_or(0)
+        );
+    }
+}
+```
+
+Provider-specific usage details:
+- **OpenAI**: Includes usage in final chunk with `stream_options: {include_usage: true}`
+- **OpenRouter**: Usage included in streaming response metadata
+- **Anthropic**: Usage provided via `MessageDelta` events in streaming
+- **Ollama**: Usage from `prompt_eval_count` and `eval_count` fields
 
 ### Fallback Tool Calling
 
