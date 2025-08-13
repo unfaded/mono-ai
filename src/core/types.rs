@@ -32,11 +32,40 @@ pub struct MonoModel {
     pub created: Option<u64>, // Creation timestamp for cloud models
 }
 
+#[derive(Debug, Clone)]
+pub struct TokenUsage {
+    pub prompt_tokens: Option<u32>,
+    pub completion_tokens: Option<u32>,
+    pub total_tokens: Option<u32>,
+    pub cost_usd: Option<f64>, // Estimated cost in USD
+}
+
+impl TokenUsage {
+    pub fn new() -> Self {
+        Self {
+            prompt_tokens: None,
+            completion_tokens: None,
+            total_tokens: None,
+            cost_usd: None,
+        }
+    }
+
+    pub fn with_tokens(prompt: u32, completion: u32) -> Self {
+        Self {
+            prompt_tokens: Some(prompt),
+            completion_tokens: Some(completion),
+            total_tokens: Some(prompt + completion),
+            cost_usd: None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct ChatStreamItem {
     pub content: String,
     pub tool_calls: Option<Vec<ToolCall>>,
     pub done: bool,
+    pub usage: Option<TokenUsage>,
 }
 
 #[derive(Debug)]
