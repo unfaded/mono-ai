@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::collections::HashMap;
 use bytes::Bytes;
 
-use crate::core::{Message, ToolCall, ChatStreamItem, Tool};
+use crate::core::{Message, ToolCall, ChatStreamItem, Tool, TokenUsage};
 use super::types::*;
 
 pub struct AnthropicClient {
@@ -237,6 +237,7 @@ struct AnthropicStreamProcessor {
     // Track tool calls being accumulated: tool_id -> (name, accumulated_json)
     accumulating_tools: HashMap<String, (String, String)>,
     pending_results: std::collections::VecDeque<Result<ChatStreamItem, String>>,
+    usage: Option<TokenUsage>,
 }
 
 impl AnthropicStreamProcessor {
@@ -245,6 +246,7 @@ impl AnthropicStreamProcessor {
             inner: Box::pin(stream),
             accumulating_tools: HashMap::new(),
             pending_results: std::collections::VecDeque::new(),
+            usage: None,
         }
     }
 }
@@ -280,6 +282,7 @@ impl Stream for AnthropicStreamProcessor {
                                             content: String::new(),
                                             tool_calls: None,
                                             done: true,
+                                            usage: None,
                                         }));
                                         continue;
                                     }
@@ -293,6 +296,7 @@ impl Stream for AnthropicStreamProcessor {
                                                             content: text,
                                                             tool_calls: None,
                                                             done: false,
+                                                            usage: None,
                                                         }));
                                                     }
                                                     Delta::InputJsonDelta { partial_json } => {
@@ -331,14 +335,27 @@ impl Stream for AnthropicStreamProcessor {
                                                         content: String::new(),
                                                         tool_calls: Some(completed_tools),
                                                         done: false,
+                                                        usage: None,
                                                     }));
                                                 }
                                             }
+                                            StreamingEvent::MessageDelta { delta } => {
+                                                if let Some(usage) = delta.usage {
+                                                    self.usage = Some(TokenUsage {
+                                                        prompt_tokens: Some(usage.input_tokens),
+                                                        completion_tokens: Some(usage.output_tokens),
+                                                        total_tokens: Some(usage.input_tokens + usage.output_tokens),
+                                                        cost_usd: None,
+                                                    });
+                                                }
+                                            }
                                             StreamingEvent::MessageStop => {
+                                                let usage = self.usage.clone();
                                                 self.pending_results.push_back(Ok(ChatStreamItem {
                                                     content: String::new(),
                                                     tool_calls: None,
                                                     done: true,
+                                                    usage,
                                                 }));
                                             }
                                             StreamingEvent::Ping => {
