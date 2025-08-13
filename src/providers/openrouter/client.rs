@@ -1,4 +1,4 @@
-use crate::core::{Message, ChatStreamItem, ToolCall, Tool, MonoModel};
+use crate::core::{Message, ChatStreamItem, ToolCall, Tool, MonoModel, TokenUsage};
 use super::types::*;
 use reqwest::Client;
 use serde_json::json;
@@ -19,6 +19,7 @@ pub enum StreamEvent {
     Content(String),
     ToolCall { id: String, name: String, arguments: String },
     Done,
+    Usage(TokenUsage),
 }
 
 #[derive(Debug, Clone)]
@@ -38,6 +39,7 @@ struct OpenRouterStreamProcessor {
     buffer: String,
     accumulating_tool_args: HashMap<usize, String>,
     tool_call_info: HashMap<usize, (String, String)>,
+    usage: Option<TokenUsage>,
 }
 
 impl OpenRouterStreamProcessor {
@@ -46,6 +48,7 @@ impl OpenRouterStreamProcessor {
             buffer: String::new(),
             accumulating_tool_args: HashMap::new(),
             tool_call_info: HashMap::new(),
+            usage: None,
         }
     }
 
@@ -70,6 +73,15 @@ impl OpenRouterStreamProcessor {
 
                 match serde_json::from_str::<OpenRouterResponse>(data) {
                     Ok(response) => {
+                        // Extract usage information if available
+                        if let Some(usage) = &response.usage {
+                            self.usage = Some(TokenUsage {
+                                prompt_tokens: Some(usage.prompt_tokens),
+                                completion_tokens: Some(usage.completion_tokens),
+                                total_tokens: Some(usage.total_tokens),
+                                cost_usd: None,
+                            });
+                        }
                         
                         if let Some(choice) = response.choices.first() {
                             if let Some(delta) = &choice.delta {
@@ -139,6 +151,9 @@ impl OpenRouterStreamProcessor {
 
                             if let Some(finish_reason) = &choice.finish_reason {
                                 if !finish_reason.is_empty() {
+                                    if let Some(usage) = self.usage.clone() {
+                                        events.push(StreamEvent::Usage(usage));
+                                    }
                                     events.push(StreamEvent::Done);
                                 }
                             }
@@ -185,6 +200,53 @@ impl OpenRouterClient {
 
     pub async fn supports_tool_calls(&self) -> Result<bool, Box<dyn std::error::Error>> {
         Ok(true)
+    }
+
+    pub async fn get_usage_for_messages(
+        &self,
+        messages: &[Message],
+        tools: Option<&[Tool]>,
+        images: &[String],
+    ) -> Result<Option<TokenUsage>, Box<dyn std::error::Error>> {
+        let openrouter_messages = self.convert_messages(messages, images);
+        let openrouter_tools = tools.map(|t| self.convert_tools(t));
+
+        let request = OpenRouterRequest {
+            model: self.model.clone(),
+            messages: openrouter_messages,
+            tools: openrouter_tools,
+            tool_choice: None,
+            stream: Some(false), // Non-streaming to get usage
+            max_tokens: Some(1), // Minimal tokens since we just want usage
+            temperature: Some(0.7),
+        };
+
+        let response = self
+            .client
+            .post(&format!("{}/chat/completions", self.base_url))
+            .header("Authorization", &format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            // Don't fail the main request if usage call fails
+            return Ok(None);
+        }
+
+        let openrouter_response: OpenRouterResponse = response.json().await?;
+        
+        if let Some(usage) = openrouter_response.usage {
+            Ok(Some(TokenUsage {
+                prompt_tokens: Some(usage.prompt_tokens),
+                completion_tokens: Some(usage.completion_tokens),
+                total_tokens: Some(usage.total_tokens),
+                cost_usd: None,
+            }))
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn get_available_models(&self) -> Result<Vec<MonoModel>, Box<dyn std::error::Error>> {
@@ -239,7 +301,7 @@ impl OpenRouterClient {
                 if let Some((tool_use_id, tool_name)) = &last_tool_call_info {                    
                     let msg = OpenRouterMessage {
                         role: "tool".to_string(),
-                        content: json!(message.content),
+                        content: serde_json::Value::String(message.content.clone()),
                         name: Some(tool_name.clone()),
                         tool_calls: None,
                         tool_call_id: Some(tool_use_id.clone()),
@@ -270,8 +332,13 @@ impl OpenRouterClient {
             }
 
             let content = if content_items.len() == 1 && content_items[0]["type"] == "text" {
-                json!(message.content)
+                // Use simple string for basic text messages
+                serde_json::Value::String(message.content.clone())
+            } else if content_items.is_empty() {
+                // Empty content
+                serde_json::Value::String(message.content.clone())
             } else {
+                // Complex content with images
                 json!(content_items)
             };
 
@@ -446,6 +513,7 @@ impl OpenRouterClient {
                     content,
                     tool_calls: None,
                     done: false,
+                    usage: None,
                 }),
                 Ok(StreamEvent::ToolCall { id, name, arguments }) => {
                     Ok(ChatStreamItem {
@@ -455,12 +523,20 @@ impl OpenRouterClient {
                             function: crate::core::Function { name, arguments: serde_json::from_str(&arguments).unwrap_or(serde_json::Value::Null) },
                         }]),
                         done: false,
+                        usage: None,
                     })
                 }
+                Ok(StreamEvent::Usage(usage)) => Ok(ChatStreamItem {
+                    content: String::new(),
+                    tool_calls: None,
+                    done: false,
+                    usage: Some(usage),
+                }),
                 Ok(StreamEvent::Done) => Ok(ChatStreamItem {
                     content: String::new(),
                     tool_calls: None,
                     done: true,
+                    usage: None,
                 }),
                 Err(e) => Err(e),
             }
