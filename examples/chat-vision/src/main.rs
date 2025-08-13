@@ -226,6 +226,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     let mut full_response = String::new();
     let mut tool_calls = None;
+    let mut final_usage = None;
 
     while let Some(item) = stream.next().await {
         let item = item.map_err(|e| format!("Stream error: {}", e))?;
@@ -239,10 +240,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(tc) = item.tool_calls {
             tool_calls = Some(tc);
         }
+
+        if let Some(usage) = item.usage {
+            final_usage = Some(usage);
+        }
         
         if item.done {
             break;
         }
+    }
+
+    // Display usage statistics if available
+    if let Some(usage) = &final_usage {
+        println!("\n{}", format!("Usage: {} input + {} output = {} total tokens", 
+            usage.prompt_tokens.unwrap_or(0),
+            usage.completion_tokens.unwrap_or(0), 
+            usage.total_tokens.unwrap_or(0)
+        ));
     }
 
     // Add assistant response to conversation

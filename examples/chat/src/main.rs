@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // the rest of the code below works the same regardless of provider
     
-    // Add tools (optional) - just comment these out for basic chat
+    // Add tools (optional)
     client.add_tool(get_weather_tool()).await?;
     client.add_tool(generate_password_tool()).await?;
 
@@ -81,6 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut stream = client.send_chat_request(&messages).await?;
         let mut full_response = String::new();
         let mut tool_calls = None;
+        let mut final_usage = None;
 
         while let Some(item) = stream.next().await {
             let item = item.map_err(|e| format!("Stream error: {}", e))?;
@@ -94,10 +95,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(tc) = item.tool_calls {
                 tool_calls = Some(tc);
             }
+
+            if let Some(usage) = item.usage {
+                final_usage = Some(usage);
+            }
             
             if item.done {
                 break;
             }
+        }
+
+
+        // Display usage statistics if available
+        if let Some(usage) = &final_usage {
+            println!("\n{}", format!("Usage: {} input + {} output = {} total tokens", 
+                usage.prompt_tokens.unwrap_or(0),
+                usage.completion_tokens.unwrap_or(0), 
+                usage.total_tokens.unwrap_or(0)
+            ).truecolor(128, 128, 128));
         }
 
         // Add assistant response with tool calls to conversation
@@ -141,6 +156,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             io::stdout().flush()?;
             let mut tool_stream = client.send_chat_request(&messages).await?;
             let mut final_response = String::new();
+            let mut tool_usage = None;
             while let Some(item) = tool_stream.next().await {
                 let item = item.map_err(|e| format!("Stream error: {}", e))?;
                 if !item.content.is_empty() {
@@ -148,9 +164,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     io::stdout().flush()?;
                     final_response.push_str(&item.content);
                 }
+                if let Some(usage) = item.usage {
+                    tool_usage = Some(usage);
+                }
                 if item.done {
                     break;
                 }
+            }
+
+
+            // Display tool follow-up usage
+            if let Some(usage) = &tool_usage {
+                println!("\n{}", format!("Tool follow-up usage: {} input + {} output = {} total tokens", 
+                    usage.prompt_tokens.unwrap_or(0),
+                    usage.completion_tokens.unwrap_or(0), 
+                    usage.total_tokens.unwrap_or(0)
+                ).truecolor(128, 128, 128));
             }
             
             // Add the final assistant response to conversation
