@@ -5,7 +5,7 @@ use std::pin::Pin;
 use std::collections::HashMap;
 use bytes::Bytes;
 
-use crate::core::{Message, ToolCall, ChatStreamItem, Tool};
+use crate::core::{Message, ToolCall, ChatStreamItem, Tool, TokenUsage};
 use super::types::*;
 
 pub struct OpenAIClient {
@@ -178,13 +178,16 @@ impl OpenAIClient {
             model: self.model.clone(),
             messages: openai_messages,
             temperature: None,
-            max_tokens: Some(4096),
+            // Use max_completion_tokens for o1 models, max_tokens for others
+            max_tokens: if self.model.contains("o1") { None } else { Some(4096) },
+            max_completion_tokens: if self.model.contains("o1") { Some(4096) } else { None },
             tools: if self.tools.is_empty() {
                 None
             } else {
                 Some(self.convert_tools_to_openai())
             },
             stream: Some(true),
+            stream_options: Some(OpenAIStreamOptions { include_usage: true }),
         };
 
         let response = self
@@ -272,6 +275,7 @@ struct OpenAIStreamProcessor {
     // Buffer for incomplete SSE events that span chunk boundaries
     buffer: String,
     done: bool,
+    usage: Option<TokenUsage>,
 }
 
 impl OpenAIStreamProcessor {
@@ -283,6 +287,7 @@ impl OpenAIStreamProcessor {
             accumulating_tool_args: HashMap::new(),
             buffer: String::new(),
             done: false,
+            usage: None,
         }
     }
 }
@@ -342,11 +347,22 @@ impl Stream for OpenAIStreamProcessor {
                                             content: String::new(),
                                             tool_calls: final_tool_calls,
                                             done: true,
+                                            usage: self.usage.clone(),
                                         })));
                                     }
                                     
                                     match serde_json::from_str::<OpenAIStreamChunk>(json_str) {
                                         Ok(chunk) => {
+                                            // Extract usage information if available
+                                            if let Some(usage) = &chunk.usage {
+                                                self.usage = Some(TokenUsage {
+                                                    prompt_tokens: Some(usage.prompt_tokens),
+                                                    completion_tokens: Some(usage.completion_tokens),
+                                                    total_tokens: Some(usage.total_tokens),
+                                                    cost_usd: None,
+                                                });
+                                            }
+                                            
                                             if let Some(choice) = chunk.choices.first() {
                                                 if let Some(delta) = &choice.delta {
                                                     let mut content = String::new();
@@ -408,6 +424,7 @@ impl Stream for OpenAIStreamProcessor {
                                                             content,
                                                             tool_calls: None, // Don't return partial tool calls
                                                             done: false,
+                                                            usage: None,
                                                         })));
                                                     }
                                                 }
@@ -463,6 +480,27 @@ impl Stream for OpenAIStreamProcessor {
                             }
                         }
                     }
+                    // Process any remaining data in buffer before ending
+                    let buffer_content = self.buffer.clone();
+                    if !buffer_content.is_empty() {
+                        for line in buffer_content.lines() {
+                            if line.starts_with("data: ") {
+                                let json_str = &line[6..];
+                                if json_str != "[DONE]" && !json_str.is_empty() {
+                                    if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(json_str) {
+                                        if let Some(usage) = &chunk.usage {
+                                            self.usage = Some(TokenUsage {
+                                                prompt_tokens: Some(usage.prompt_tokens),
+                                                completion_tokens: Some(usage.completion_tokens),
+                                                total_tokens: Some(usage.total_tokens),
+                                                cost_usd: None,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     
                     self.done = true;
                     let final_tool_calls = if !self.accumulated_tool_calls.is_empty() {
@@ -487,6 +525,7 @@ impl Stream for OpenAIStreamProcessor {
                         content: String::new(),
                         tool_calls: final_tool_calls,
                         done: true,
+                        usage: self.usage.clone(),
                     })));
                 }
                 std::task::Poll::Pending => {
