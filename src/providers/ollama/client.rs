@@ -9,10 +9,6 @@ use crate::core::{Message, ToolCall, ChatStreamItem, PullProgress, ModelInfo, To
 use super::{OllamaOptions, ChatResponse, Model, ListModelsResponse};
 use super::utilities::StreamingXmlFilter;
 
-fn get_ollama_model_pricing(_model: &str) -> (f64, f64) {
-    // Ollama runs locally, so costs are $0
-    (0.0, 0.0)
-}
 
 impl Tool {
     fn to_json(&self) -> serde_json::Value {

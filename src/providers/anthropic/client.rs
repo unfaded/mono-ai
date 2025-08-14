@@ -254,12 +254,6 @@ impl AnthropicClient {
         // Anthropic doesn't need fallback processing
         (content.to_string(), None)
     }
-    
-    // Calculate cost based on token usage
-    fn calculate_cost(&self, prompt_tokens: u32, completion_tokens: u32) -> f64 {
-        let (input_price, output_price) = get_anthropic_model_pricing(&self.model);
-        (prompt_tokens as f64 * input_price) + (completion_tokens as f64 * output_price)
-    }
 }
 
 // Custom stream processor to handle stateful tool call accumulation
