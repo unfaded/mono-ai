@@ -1,4 +1,4 @@
-use crate::core::{Message, ChatStreamItem, ToolCall, Tool, MonoModel, TokenUsage};
+use crate::core::{Message, ChatStreamItem, ToolCall, Tool, MonoModel, TokenUsage, FallbackToolHandler};
 use super::types::*;
 use reqwest::Client;
 use serde_json::json;
@@ -185,7 +185,12 @@ impl OpenRouterClient {
     }
 
     pub async fn is_fallback_mode(&self) -> bool {
-        false
+        if self.tools.is_empty() {
+            false // No tools, no fallback needed
+        } else {
+            // Dynamically check if model supports native tools
+            !self.supports_tool_calls().await.unwrap_or(false)
+        }
     }
 
     pub fn set_debug_mode(&mut self, _debug: bool) {
@@ -197,7 +202,29 @@ impl OpenRouterClient {
     }
 
     pub async fn supports_tool_calls(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        Ok(true)
+        // Get model info to check supported parameters
+        let response = self
+            .client
+            .get(&format!("{}/models/{}", self.base_url, self.model))
+            .header("Authorization", &format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .send()
+            .await?;
+            
+        if !response.status().is_success() {
+            // If we can't get model info, assume no tool support
+            return Ok(false);
+        }
+        
+        let model_info: OpenRouterModel = response.json().await?;
+        
+        // Check if 'tools' is in the supported_parameters
+        if let Some(supported_params) = model_info.supported_parameters {
+            Ok(supported_params.contains(&"tools".to_string()))
+        } else {
+            // If no supported_parameters field, assume no tool support
+            Ok(false)
+        }
     }
 
     pub async fn get_usage_for_messages(
@@ -685,8 +712,12 @@ impl OpenRouterClient {
     }
 
     pub async fn process_fallback_response(&self, content: &str) -> (String, Option<Vec<ToolCall>>) {
-        // OpenRouter typically uses native tool calling, so fallback processing is minimal
-        (content.to_string(), None)
+        let is_fallback = self.is_fallback_mode().await;
+        if !is_fallback {
+            return (content.to_string(), None);
+        }
+
+        FallbackToolHandler::process_fallback_response(content)
     }
 
     async fn execute_tool_call(&self, tool_call: &ToolCall) -> String {
