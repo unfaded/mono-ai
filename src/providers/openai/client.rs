@@ -322,20 +322,6 @@ impl OpenAIClient {
         // OpenAI doesn't need fallback processing since it has native tool support
         (content.to_string(), None)
     }
-
-    // Get OpenAI model pricing (input cost per token, output cost per token)
-    fn get_model_pricing(&self) -> (f64, f64) {
-        get_openai_model_pricing(&self.model)
-    }
-
-    // Calculate cost based on token usage
-    fn calculate_cost(&self, prompt_tokens: u32, completion_tokens: u32) -> f64 {
-        let (input_price, output_price) = get_openai_model_pricing(&self.model);
-        eprintln!("Debug: StreamProcessor model '{}' pricing: input=${:.9}, output=${:.9}", self.model, input_price, output_price);
-        let cost = (prompt_tokens as f64 * input_price) + (completion_tokens as f64 * output_price);
-        eprintln!("Debug: StreamProcessor cost calculation: {} * {:.9} + {} * {:.9} = {:.9}", prompt_tokens, input_price, completion_tokens, output_price, cost);
-        cost
-    }
 }
 
 // Custom stream processor for OpenAI streaming responses
@@ -364,11 +350,6 @@ impl OpenAIStreamProcessor {
             usage: None,
             model,
         }
-    }
-
-    // Get OpenAI model pricing (input cost per token, output cost per token)
-    fn get_model_pricing(&self) -> (f64, f64) {
-        get_openai_model_pricing(&self.model)
     }
 
     // Calculate cost based on token usage

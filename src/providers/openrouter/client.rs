@@ -788,14 +788,6 @@ impl OpenRouterClient {
         FallbackToolHandler::process_fallback_response(content)
     }
 
-    async fn execute_tool_call(&self, tool_call: &ToolCall) -> String {
-        // Find the tool in our tools list
-        if let Some(tool) = self.tools.iter().find(|t| t.name == tool_call.function.name) {
-            // Execute the tool function
-            return (tool.function)(tool_call.function.arguments.clone());
-        }
-        format!("Tool {} not found or invalid arguments", tool_call.function.name)
-    }
 }
 
 // Helper function to get model pricing from OpenRouter API
