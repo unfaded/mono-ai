@@ -237,9 +237,9 @@ impl OpenAIClient {
             model: self.model.clone(),
             messages: openai_messages,
             temperature: None,
-            // Use max_completion_tokens for o1 models, max_tokens for others
-            max_tokens: if self.model.contains("o1") { None } else { Some(4096) },
-            max_completion_tokens: if self.model.contains("o1") { Some(4096) } else { None },
+            // Use max_completion_tokens for o1 and gpt-5 models, max_tokens for others
+            max_tokens: if self.model.contains("o1") || self.model.contains("gpt-5") { None } else { Some(4096) },
+            max_completion_tokens: if self.model.contains("o1") || self.model.contains("gpt-5") { Some(4096) } else { None },
             tools: if self.tools.is_empty() {
                 None
             } else {
