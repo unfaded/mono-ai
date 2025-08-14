@@ -8,6 +8,34 @@ use bytes::Bytes;
 use crate::core::{Message, ToolCall, ChatStreamItem, Tool, TokenUsage};
 use super::types::*;
 
+// Manual OpenAI model pricing function (based on official OpenAI pricing)
+fn get_openai_model_pricing(model: &str) -> (f64, f64) {
+    match model {
+        // GPT-5 series
+        "gpt-5" | "gpt-5-2025-08-07" | "gpt-5-chat-latest" => (1.250e-6, 10.000e-6), // $1.250/1M input, $10.000/1M output
+        "gpt-5-mini" | "gpt-5-mini-2025-08-07" => (0.250e-6, 2.000e-6), // $0.250/1M input, $2.000/1M output
+        "gpt-5-nano" | "gpt-5-nano-2025-08-07" => (0.050e-6, 0.400e-6), // $0.050/1M input, $0.400/1M output
+        
+        // GPT-4.1 series
+        "gpt-4.1" | "gpt-4.1-2025-04-14" => (3.00e-6, 12.00e-6), // $3.00/1M input, $12.00/1M output
+        "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => (0.80e-6, 3.20e-6), // $0.80/1M input, $3.20/1M output
+        "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => (0.20e-6, 0.80e-6), // $0.20/1M input, $0.80/1M output
+        
+        // Realtime API
+        "gpt-4o" | "gpt-4o-2024-05-13" | "gpt-4o-2024-08-06" | "gpt-4o-2024-11-20" => (5.00e-6, 20.00e-6), // $5.00/1M input, $20.00/1M output
+        "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => (0.60e-6, 2.40e-6), // $0.60/1M input, $2.40/1M output
+        
+        // Image Generation API
+        "gpt-image-1" => (5.00e-6, 0.0), // $5.00/1M input, no output tokens
+        
+        // o4-mini reinforcement fine-tuning
+        "o4-mini" => (4.00e-6, 16.00e-6), // $4.00/1M input, $16.00/1M output
+        
+        // Default fallback for unknown models
+        _ => (0.0, 0.0),
+    }
+}
+
 pub struct OpenAIClient {
     client: Client,
     api_key: String,
@@ -206,8 +234,8 @@ impl OpenAIClient {
 
         let stream = response.bytes_stream();
         
-        // Create a stateful stream processor
-        Ok(Box::pin(OpenAIStreamProcessor::new(Box::pin(stream))))
+        // Create a stateful stream processor with model for pricing
+        Ok(Box::pin(OpenAIStreamProcessor::new(Box::pin(stream), self.model.clone())))
     }
 
     pub async fn send_chat_request_no_stream(
@@ -263,6 +291,17 @@ impl OpenAIClient {
         // OpenAI doesn't need fallback processing since it has native tool support
         (content.to_string(), None)
     }
+
+    // Get OpenAI model pricing (input cost per token, output cost per token)
+    fn get_model_pricing(&self) -> (f64, f64) {
+        get_openai_model_pricing(&self.model)
+    }
+
+    // Calculate cost based on token usage
+    fn calculate_cost(&self, prompt_tokens: u32, completion_tokens: u32) -> f64 {
+        let (input_price, output_price) = get_openai_model_pricing(&self.model);
+        (prompt_tokens as f64 * input_price) + (completion_tokens as f64 * output_price)
+    }
 }
 
 // Custom stream processor for OpenAI streaming responses
@@ -276,10 +315,11 @@ struct OpenAIStreamProcessor {
     buffer: String,
     done: bool,
     usage: Option<TokenUsage>,
+    model: String,
 }
 
 impl OpenAIStreamProcessor {
-    fn new(stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>) -> Self {
+    fn new(stream: Pin<Box<dyn Stream<Item = Result<Bytes, reqwest::Error>> + Send>>, model: String) -> Self {
         Self {
             stream,
             accumulated_content: String::new(),
@@ -288,7 +328,19 @@ impl OpenAIStreamProcessor {
             buffer: String::new(),
             done: false,
             usage: None,
+            model,
         }
+    }
+
+    // Get OpenAI model pricing (input cost per token, output cost per token)
+    fn get_model_pricing(&self) -> (f64, f64) {
+        get_openai_model_pricing(&self.model)
+    }
+
+    // Calculate cost based on token usage
+    fn calculate_cost(&self, prompt_tokens: u32, completion_tokens: u32) -> f64 {
+        let (input_price, output_price) = get_openai_model_pricing(&self.model);
+        (prompt_tokens as f64 * input_price) + (completion_tokens as f64 * output_price)
     }
 }
 
@@ -355,11 +407,12 @@ impl Stream for OpenAIStreamProcessor {
                                         Ok(chunk) => {
                                             // Extract usage information if available
                                             if let Some(usage) = &chunk.usage {
+                                                let cost_usd = Some(self.calculate_cost(usage.prompt_tokens, usage.completion_tokens));
                                                 self.usage = Some(TokenUsage {
                                                     prompt_tokens: Some(usage.prompt_tokens),
                                                     completion_tokens: Some(usage.completion_tokens),
                                                     total_tokens: Some(usage.total_tokens),
-                                                    cost_usd: None,
+                                                    cost_usd,
                                                 });
                                             }
                                             
@@ -489,11 +542,12 @@ impl Stream for OpenAIStreamProcessor {
                                 if json_str != "[DONE]" && !json_str.is_empty() {
                                     if let Ok(chunk) = serde_json::from_str::<OpenAIStreamChunk>(json_str) {
                                         if let Some(usage) = &chunk.usage {
+                                            let cost_usd = Some(self.calculate_cost(usage.prompt_tokens, usage.completion_tokens));
                                             self.usage = Some(TokenUsage {
                                                 prompt_tokens: Some(usage.prompt_tokens),
                                                 completion_tokens: Some(usage.completion_tokens),
                                                 total_tokens: Some(usage.total_tokens),
-                                                cost_usd: None,
+                                                cost_usd,
                                             });
                                         }
                                     }
