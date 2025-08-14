@@ -202,27 +202,33 @@ impl OpenRouterClient {
     }
 
     pub async fn supports_tool_calls(&self) -> Result<bool, Box<dyn std::error::Error>> {
-        // Get model info to check supported parameters
+        // Get all models to find our specific model and check supported parameters
         let response = self
             .client
-            .get(&format!("{}/models/{}", self.base_url, self.model))
+            .get(&format!("{}/models", self.base_url))
             .header("Authorization", &format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .send()
             .await?;
             
         if !response.status().is_success() {
-            // If we can't get model info, assume no tool support
+            // If we can't get models list, assume no tool support
             return Ok(false);
         }
         
-        let model_info: OpenRouterModel = response.json().await?;
+        let models_response: OpenRouterModelsResponse = response.json().await?;
         
-        // Check if 'tools' is in the supported_parameters
-        if let Some(supported_params) = model_info.supported_parameters {
-            Ok(supported_params.contains(&"tools".to_string()))
+        // Find our specific model in the list
+        if let Some(model_info) = models_response.data.iter().find(|m| m.id == self.model) {
+            // Check if 'tools' is in the supported_parameters
+            if let Some(supported_params) = &model_info.supported_parameters {
+                Ok(supported_params.contains(&"tools".to_string()))
+            } else {
+                // If no supported_parameters field, assume no tool support
+                Ok(false)
+            }
         } else {
-            // If no supported_parameters field, assume no tool support
+            // Model not found in list, assume no tool support
             Ok(false)
         }
     }
@@ -514,7 +520,11 @@ impl OpenRouterClient {
         &self,
         messages: &[Message],
     ) -> Result<Pin<Box<dyn futures_util::Stream<Item = Result<ChatStreamItem, String>> + Send>>, Box<dyn std::error::Error>> {
-        let tools = if !self.tools.is_empty() {
+        let mut messages_to_send = messages.to_vec();
+        
+        // In fallback mode, inject tool context into the system message
+        let is_fallback = self.is_fallback_mode().await;
+        let tools = if !self.tools.is_empty() && !is_fallback {
             Some(self.tools.iter().map(|tool| Tool {
                 name: tool.name.clone(),
                 description: tool.description.clone(),
@@ -524,6 +534,23 @@ impl OpenRouterClient {
         } else {
             None
         };
+        
+        if is_fallback && !self.tools.is_empty() {
+            let tool_context = FallbackToolHandler::generate_tool_context(&self.tools);
+            
+            // Find existing system message or create one
+            if let Some(system_msg) = messages_to_send.iter_mut().find(|msg| msg.role == "system") {
+                system_msg.content.push_str(&tool_context);
+            } else {
+                // Insert system message at the beginning
+                messages_to_send.insert(0, Message {
+                    role: "system".to_string(),
+                    content: format!("You are a helpful assistant.{}", tool_context),
+                    images: None,
+                    tool_calls: None,
+                });
+            }
+        }
 
         let images: Vec<String> = messages
             .iter()
@@ -533,7 +560,7 @@ impl OpenRouterClient {
             .collect();
 
         let stream_options = StreamOptions { include_usage: true };
-        let event_stream = self.chat_completion_stream(messages.to_vec(), tools, stream_options, images).await?;
+        let event_stream = self.chat_completion_stream(messages_to_send, tools, stream_options, images).await?;
 
         // Store client info for usage request
         let api_key = self.api_key.clone();
@@ -597,7 +624,11 @@ impl OpenRouterClient {
         &self,
         messages: &[Message],
     ) -> Result<(String, Option<Vec<ToolCall>>), Box<dyn std::error::Error>> {
-        let tools = if !self.tools.is_empty() {
+        let mut messages_to_send = messages.to_vec();
+        
+        // In fallback mode, inject tool context into the system message
+        let is_fallback = self.is_fallback_mode().await;
+        let tools = if !self.tools.is_empty() && !is_fallback {
             Some(self.tools.iter().map(|tool| Tool {
                 name: tool.name.clone(),
                 description: tool.description.clone(),
@@ -607,6 +638,23 @@ impl OpenRouterClient {
         } else {
             None
         };
+        
+        if is_fallback && !self.tools.is_empty() {
+            let tool_context = FallbackToolHandler::generate_tool_context(&self.tools);
+            
+            // Find existing system message or create one
+            if let Some(system_msg) = messages_to_send.iter_mut().find(|msg| msg.role == "system") {
+                system_msg.content.push_str(&tool_context);
+            } else {
+                // Insert system message at the beginning
+                messages_to_send.insert(0, Message {
+                    role: "system".to_string(),
+                    content: format!("You are a helpful assistant.{}", tool_context),
+                    images: None,
+                    tool_calls: None,
+                });
+            }
+        }
 
         let images: Vec<String> = messages
             .iter()
@@ -615,9 +663,15 @@ impl OpenRouterClient {
             .cloned()
             .collect();
 
-        let response = self.chat_completion(messages.to_vec(), tools, images).await?;
+        let response = self.chat_completion(messages_to_send, tools, images).await?;
         
-        Ok((response, None))
+        // Check for fallback tool calls in the response
+        if is_fallback {
+            let (clean_response, tool_calls) = self.process_fallback_response(&response).await;
+            Ok((clean_response, tool_calls))
+        } else {
+            Ok((response, None))
+        }
     }
 
     pub async fn send_chat_request_with_images(
@@ -697,18 +751,32 @@ impl OpenRouterClient {
     }
 
     pub async fn handle_tool_calls(&self, tool_calls: Vec<ToolCall>) -> Vec<Message> {
-        // Similar to other providers, execute tool calls and return formatted messages
-        let mut messages = Vec::new();
+        let mut tool_responses = Vec::new();
         for tool_call in tool_calls {
-            let result = self.execute_tool_call(&tool_call).await;
-            messages.push(Message {
-                role: "tool".to_string(),
-                content: result,
-                images: None,
-                tool_calls: None,
-            });
+            if let Some(tool) = self
+                .tools
+                .iter()
+                .find(|t| t.name == tool_call.function.name)
+            {
+                let result = (tool.function)(tool_call.function.arguments.clone());
+                
+                // In fallback mode, format tool response as user message with tool context
+                let is_fallback = self.is_fallback_mode().await;
+                let (role, content) = if is_fallback {
+                    ("user".to_string(), format!("Tool response from {}: {}", tool_call.function.name, result))
+                } else {
+                    ("tool".to_string(), result)
+                };
+                
+                tool_responses.push(Message {
+                    role,
+                    content,
+                    images: None,
+                    tool_calls: None,
+                });
+            }
         }
-        messages
+        tool_responses
     }
 
     pub async fn process_fallback_response(&self, content: &str) -> (String, Option<Vec<ToolCall>>) {
