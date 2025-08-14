@@ -108,10 +108,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Display usage statistics if available
         if let Some(usage) = &final_usage {
-            println!("\n{}", format!("Usage: {} input + {} output = {} total tokens", 
+            let cost_display = if let Some(cost) = usage.cost_usd {
+                if cost > 0.0 {
+                    format!(" (${:.6})", cost)
+                } else {
+                    " (free)".to_string()
+                }
+            } else {
+                "".to_string()
+            };
+            println!("\n{}", format!("Usage: {} input + {} output = {} total tokens{}", 
                 usage.prompt_tokens.unwrap_or(0),
                 usage.completion_tokens.unwrap_or(0), 
-                usage.total_tokens.unwrap_or(0)
+                usage.total_tokens.unwrap_or(0),
+                cost_display
             ).truecolor(128, 128, 128));
         }
 
@@ -175,10 +185,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Display tool follow-up usage
             if let Some(usage) = &tool_usage {
-                println!("\n{}", format!("Tool follow-up usage: {} input + {} output = {} total tokens", 
+                let cost_display = if let Some(cost) = usage.cost_usd {
+                    if cost > 0.0 {
+                        format!(" (${:.6})", cost)
+                    } else {
+                        " (free)".to_string()
+                    }
+                } else {
+                    "".to_string()
+                };
+                println!("\n{}", format!("Tool follow-up usage: {} input + {} output = {} total tokens{}", 
                     usage.prompt_tokens.unwrap_or(0),
                     usage.completion_tokens.unwrap_or(0), 
-                    usage.total_tokens.unwrap_or(0)
+                    usage.total_tokens.unwrap_or(0),
+                    cost_display
                 ).truecolor(128, 128, 128));
             }
             
