@@ -402,6 +402,10 @@ impl Stream for OpenAIStreamProcessor {
                             // Add new chunk to buffer
                             self.buffer.push_str(&chunk_str);
                             
+                            // Collect all content from complete SSE events in buffer
+                            let mut accumulated_content = String::new();
+                            let mut has_any_tool_calls = false;
+                            
                             // Process complete SSE events from buffer
                             while let Some(event_end) = self.buffer.find("\n\n") {
                                 let event = self.buffer[..event_end].to_string();
@@ -455,20 +459,17 @@ impl Stream for OpenAIStreamProcessor {
                                             
                                             if let Some(choice) = chunk.choices.first() {
                                                 if let Some(delta) = &choice.delta {
-                                                    let mut content = String::new();
-                                                    let mut has_tool_calls = false;
-                                                    
                                                     // Handle content delta
                                                     if let Some(delta_content) = &delta.content {
                                                         if let Some(text) = delta_content.as_str() {
-                                                            content = text.to_string();
-                                                            self.accumulated_content.push_str(&content);
+                                                            accumulated_content.push_str(text);
+                                                            self.accumulated_content.push_str(text);
                                                         }
                                                     }
                                                     
                                                     // Handle tool call deltas
                                                     if let Some(tool_calls) = &delta.tool_calls {
-                                                        has_tool_calls = true;
+                                                        has_any_tool_calls = true;
                                                         for (i, tool_call) in tool_calls.iter().enumerate() {
                                                             // Ensure tool call entry exists
                                                             if !self.accumulated_tool_calls.contains_key(&i) {
@@ -508,15 +509,6 @@ impl Stream for OpenAIStreamProcessor {
                                                             }
                                                         }
                                                     }
-                                                    
-                                                    if !content.is_empty() || has_tool_calls {
-                                                        return std::task::Poll::Ready(Some(Ok(ChatStreamItem {
-                                                            content,
-                                                            tool_calls: None, // Don't return partial tool calls
-                                                            done: false,
-                                                            usage: None,
-                                                        })));
-                                                    }
                                                 }
                                             }
                                         }
@@ -527,6 +519,16 @@ impl Stream for OpenAIStreamProcessor {
                                     } // End of line processing
                                 } // End of event.lines() loop
                             } // End of while let Some(event_end) loop
+                            
+                            // Return accumulated content from all processed events
+                            if !accumulated_content.is_empty() || has_any_tool_calls {
+                                return std::task::Poll::Ready(Some(Ok(ChatStreamItem {
+                                    content: accumulated_content,
+                                    tool_calls: None, // Don't return partial tool calls
+                                    done: false,
+                                    usage: None,
+                                })));
+                            }
                         }
                         Err(e) => {
                             return std::task::Poll::Ready(Some(Err(format!("Stream error: {}", e))));
