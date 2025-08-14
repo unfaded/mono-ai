@@ -14,6 +14,13 @@ pub struct OpenRouterRequest {
     pub max_tokens: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stream_options: Option<OpenRouterStreamOptions>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct OpenRouterStreamOptions {
+    pub include_usage: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

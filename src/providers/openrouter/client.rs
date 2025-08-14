@@ -65,7 +65,6 @@ impl OpenRouterStreamProcessor {
             }
 
             if let Some(data) = event_data.strip_prefix("data: ") {
-                
                 if data == "[DONE]" {
                     events.push(StreamEvent::Done);
                     break;
@@ -75,12 +74,14 @@ impl OpenRouterStreamProcessor {
                     Ok(response) => {
                         // Extract usage information if available
                         if let Some(usage) = &response.usage {
-                            self.usage = Some(TokenUsage {
+                            let token_usage = TokenUsage {
                                 prompt_tokens: Some(usage.prompt_tokens),
                                 completion_tokens: Some(usage.completion_tokens),
                                 total_tokens: Some(usage.total_tokens),
-                                cost_usd: None,
-                            });
+                                cost_usd: None, // Will be calculated later in the stream
+                            };
+                            self.usage = Some(token_usage.clone());
+                            events.push(StreamEvent::Usage(token_usage));
                         }
                         
                         if let Some(choice) = response.choices.first() {
@@ -135,8 +136,8 @@ impl OpenRouterStreamProcessor {
                                                             }
                                                             self.accumulating_tool_args.remove(&index);
                                                         },
-                                                        Err(_e) => {
-
+                                                        Err(_) => {
+                                                            // JSON parsing failed, continue accumulating
                                                         }
                                                     }
                                                 }
@@ -144,23 +145,20 @@ impl OpenRouterStreamProcessor {
                                         }
                                     },
                                     None => {
-
+                                        // No tool calls in this chunk
                                     }
                                 }
                             }
 
                             if let Some(finish_reason) = &choice.finish_reason {
                                 if !finish_reason.is_empty() {
-                                    if let Some(usage) = self.usage.clone() {
-                                        events.push(StreamEvent::Usage(usage));
-                                    }
                                     events.push(StreamEvent::Done);
                                 }
                             }
                         }
                     },
-                    Err(_e) => {
-                       
+                    Err(_) => {
+                        // Failed to parse JSON chunk, skip it
                     }
                 }
             }
@@ -219,6 +217,7 @@ impl OpenRouterClient {
             stream: Some(false), // Non-streaming to get usage
             max_tokens: Some(1), // Minimal tokens since we just want usage
             temperature: Some(0.7),
+            stream_options: None, // Not needed for non-streaming
         };
 
         let response = self
@@ -398,6 +397,7 @@ impl OpenRouterClient {
             stream: Some(false),
             max_tokens: Some(4096),
             temperature: Some(0.7),
+            stream_options: None, // Not needed for non-streaming
         };
 
         let response = self
@@ -445,6 +445,7 @@ impl OpenRouterClient {
             stream: Some(true),
             max_tokens: Some(4096),
             temperature: Some(0.7),
+            stream_options: Some(super::types::OpenRouterStreamOptions { include_usage: true }),
         };
 
         let response = self
@@ -504,41 +505,61 @@ impl OpenRouterClient {
             .cloned()
             .collect();
 
-        let stream_options = StreamOptions { include_usage: false };
+        let stream_options = StreamOptions { include_usage: true };
         let event_stream = self.chat_completion_stream(messages.to_vec(), tools, stream_options, images).await?;
 
-        let mapped_stream = event_stream.map(|event| {
-            match event {
-                Ok(StreamEvent::Content(content)) => Ok(ChatStreamItem {
-                    content,
-                    tool_calls: None,
-                    done: false,
-                    usage: None,
-                }),
-                Ok(StreamEvent::ToolCall { id, name, arguments }) => {
-                    Ok(ChatStreamItem {
-                        content: String::new(),
-                        tool_calls: Some(vec![ToolCall {
-                            id: Some(id),
-                            function: crate::core::Function { name, arguments: serde_json::from_str(&arguments).unwrap_or(serde_json::Value::Null) },
-                        }]),
+        // Store client info for usage request
+        let api_key = self.api_key.clone();
+        let model = self.model.clone();
+        let base_url = self.base_url.clone();
+        let client = self.client.clone();
+        let messages_for_usage = messages.to_vec();
+        
+        let mapped_stream = event_stream.then(move |event| {
+            let api_key = api_key.clone();
+            let model = model.clone();
+            let base_url = base_url.clone();
+            let client = client.clone();
+            let messages_for_usage = messages_for_usage.clone();
+            
+            async move {
+                match event {
+                    Ok(StreamEvent::Content(content)) => Ok(ChatStreamItem {
+                        content,
+                        tool_calls: None,
                         done: false,
                         usage: None,
-                    })
+                    }),
+                    Ok(StreamEvent::ToolCall { id, name, arguments }) => {
+                        Ok(ChatStreamItem {
+                            content: String::new(),
+                            tool_calls: Some(vec![ToolCall {
+                                id: Some(id),
+                                function: crate::core::Function { name, arguments: serde_json::from_str(&arguments).unwrap_or(serde_json::Value::Null) },
+                            }]),
+                            done: false,
+                            usage: None,
+                        })
+                    }
+                    Ok(StreamEvent::Usage(usage)) => Ok(ChatStreamItem {
+                        content: String::new(),
+                        tool_calls: None,
+                        done: false,
+                        usage: Some(usage),
+                    }),
+                    Ok(StreamEvent::Done) => {
+                        // Make a quick usage request when stream is done
+                        let usage = get_usage_estimate(&client, &api_key, &base_url, &model, &messages_for_usage).await;
+                        
+                        Ok(ChatStreamItem {
+                            content: String::new(),
+                            tool_calls: None,
+                            done: true,
+                            usage,
+                        })
+                    },
+                    Err(e) => Err(e),
                 }
-                Ok(StreamEvent::Usage(usage)) => Ok(ChatStreamItem {
-                    content: String::new(),
-                    tool_calls: None,
-                    done: false,
-                    usage: Some(usage),
-                }),
-                Ok(StreamEvent::Done) => Ok(ChatStreamItem {
-                    content: String::new(),
-                    tool_calls: None,
-                    done: true,
-                    usage: None,
-                }),
-                Err(e) => Err(e),
             }
         });
 
@@ -676,4 +697,107 @@ impl OpenRouterClient {
         }
         format!("Tool {} not found or invalid arguments", tool_call.function.name)
     }
+}
+
+// Helper function to get model pricing from OpenRouter API
+async fn get_model_pricing(
+    client: &Client,
+    model: &str,
+) -> Option<(f64, f64)> {
+    let response = client
+        .get("https://openrouter.ai/api/v1/models")
+        .send()
+        .await;
+
+    if let Ok(response) = response {
+        if response.status().is_success() {
+            if let Ok(models_response) = response.json::<serde_json::Value>().await {
+                if let Some(data) = models_response["data"].as_array() {
+                    for model_data in data {
+                        if let Some(id) = model_data["id"].as_str() {
+                            if id == model {
+                                if let Some(pricing) = model_data["pricing"].as_object() {
+                                    let prompt_price = pricing["prompt"].as_str()
+                                        .and_then(|s| s.parse::<f64>().ok())
+                                        .unwrap_or(0.0);
+                                    let completion_price = pricing["completion"].as_str()
+                                        .and_then(|s| s.parse::<f64>().ok())
+                                        .unwrap_or(0.0);
+                                    return Some((prompt_price, completion_price));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    None
+}
+
+// Helper function to get usage information
+async fn get_usage_estimate(
+    client: &Client,
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+    messages: &[Message],
+) -> Option<TokenUsage> {
+    // Convert messages to OpenRouter format
+    let openrouter_messages: Vec<super::types::OpenRouterMessage> = messages
+        .iter()
+        .map(|msg| super::types::OpenRouterMessage {
+            role: msg.role.clone(),
+            content: serde_json::Value::String(msg.content.clone()),
+            name: None,
+            tool_calls: None,
+            tool_call_id: None,
+        })
+        .collect();
+
+    let request = super::types::OpenRouterRequest {
+        model: model.to_string(),
+        messages: openrouter_messages,
+        tools: None,
+        tool_choice: None,
+        stream: Some(false),
+        max_tokens: Some(1), // Minimal tokens since we just want usage
+        temperature: Some(0.7),
+        stream_options: None,
+    };
+
+    let response = client
+        .post(&format!("{}/chat/completions", base_url))
+        .header("Authorization", &format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&request)
+        .send()
+        .await;
+
+    if let Ok(response) = response {
+        if response.status().is_success() {
+            if let Ok(openrouter_response) = response.json::<super::types::OpenRouterResponse>().await {
+                if let Some(usage) = openrouter_response.usage {
+                    // Get pricing information for cost calculation
+                    let cost_usd = if let Some((prompt_price, completion_price)) = get_model_pricing(client, model).await {
+                        let prompt_cost = usage.prompt_tokens as f64 * prompt_price;
+                        let completion_cost = usage.completion_tokens as f64 * completion_price;
+                        Some(prompt_cost + completion_cost)
+                    } else {
+                        None
+                    };
+
+                    return Some(TokenUsage {
+                        prompt_tokens: Some(usage.prompt_tokens),
+                        completion_tokens: Some(usage.completion_tokens),
+                        total_tokens: Some(usage.total_tokens),
+                        cost_usd,
+                    });
+                }
+            }
+        }
+    }
+    
+    None
 }
