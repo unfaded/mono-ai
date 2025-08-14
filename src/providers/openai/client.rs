@@ -9,6 +9,7 @@ use crate::core::{Message, ToolCall, ChatStreamItem, Tool, TokenUsage};
 use super::types::*;
 
 // Manual OpenAI model pricing function (based on official OpenAI pricing)
+// Sadly they don't have a pricing per token in their API like openrouter
 fn get_openai_model_pricing(model: &str) -> (f64, f64) {
     match model {
         // GPT-5 series
