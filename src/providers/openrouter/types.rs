@@ -118,6 +118,8 @@ pub struct OpenRouterImageUrl {
 pub struct OpenRouterModel {
     pub id: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub supported_parameters: Option<Vec<String>>,
     // We only need id and name, but include the rest as serde_json::Value to avoid parsing errors
     #[serde(flatten)]
     pub _extra: serde_json::Value,
